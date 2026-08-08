@@ -19,3 +19,21 @@ model Lead {
   status      String   @default("new")
   createdAt   DateTime @default(now())
 }
+
+model Order {
+  id               String   @id @default(cuid())
+  customerName     String
+  phone            String
+  email            String?
+  schoolOrOrg      String?
+  address          String
+  items            Json
+  subtotal         Int
+  gstAmount        Int
+  deliveryFee      Int      @default(0)
+  totalAmount      Int
+  paymentStatus    String   @default("pending_verification")
+  orderStatus      String   @default("processing")
+  paymentProofNote String?
+  createdAt        DateTime @default(now())
+}
