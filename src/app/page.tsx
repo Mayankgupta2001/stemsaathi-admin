@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { authenticatedFetch } from "@/lib/api";
 import { clearStoredAdminToken, useAdminAuthGuard } from "@/lib/auth";
@@ -46,6 +46,34 @@ type Order = {
   orderStatus: OrderStatus | string;
   paymentProofNote?: string | null;
   createdAt: string;
+};
+
+type Product = {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  originalPrice?: number | null;
+  images: string[];
+  rating?: number;
+  reviewCount?: number;
+  badge?: string | null;
+  stock: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type ProductFormState = {
+  name: string;
+  description: string;
+  category: string;
+  price: string;
+  originalPrice: string;
+  imagesText: string;
+  stock: string;
+  badge: string;
 };
 
 const statusStyles: Record<string, { badge: string; dot: string }> = {
@@ -112,6 +140,30 @@ const avatarColor = (name: string) => {
   return avatarPalette[sum % avatarPalette.length];
 };
 
+const productCategories = [
+  "Electronic Components",
+  "3D Printers & Parts",
+  "Sensors",
+  "Drones & Parts",
+  "Mechanical Tools",
+  "STEM Kits",
+  "Robotics Kits",
+  "Science Lab Material",
+  "Chemistry Lab Material",
+  "Biology Lab Material",
+];
+
+const createEmptyProductForm = (): ProductFormState => ({
+  name: "",
+  description: "",
+  category: "",
+  price: "",
+  originalPrice: "",
+  imagesText: "",
+  stock: "100",
+  badge: "",
+});
+
 function StatCard({
   label,
   value,
@@ -146,7 +198,7 @@ export default function DashboardPage() {
     redirectPath: "/login",
   });
 
-  const [activeTab, setActiveTab] = useState<"leads" | "orders">("leads");
+  const [activeTab, setActiveTab] = useState<"leads" | "orders" | "products">("leads");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -165,6 +217,19 @@ export default function DashboardPage() {
   const [pendingOrderUpdateId, setPendingOrderUpdateId] = useState<string | null>(null);
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [ordersLoaded, setOrdersLoaded] = useState(false);
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [productsError, setProductsError] = useState("");
+  const [productsSearch, setProductsSearch] = useState("");
+  const [productCategoryFilter, setProductCategoryFilter] = useState("all");
+  const [productsLoaded, setProductsLoaded] = useState(false);
+  const [isProductFormOpen, setIsProductFormOpen] = useState(false);
+  const [productFormMode, setProductFormMode] = useState<"create" | "edit">("create");
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [productForm, setProductForm] = useState<ProductFormState>(createEmptyProductForm);
+  const [productSubmitting, setProductSubmitting] = useState(false);
+  const [pendingProductToggleId, setPendingProductToggleId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isReady || !token) return;
@@ -223,6 +288,35 @@ export default function DashboardPage() {
     fetchOrders();
   }, [activeTab, isReady, ordersLoaded, router, token]);
 
+  useEffect(() => {
+    if (!isReady || !token || activeTab !== "products" || productsLoaded) return;
+
+    const fetchProducts = async () => {
+      setProductsLoading(true);
+      setProductsError("");
+      try {
+        const response = await authenticatedFetch<{ products: Product[] }>("/api/products", { token });
+        if (!response.ok) {
+          if (response.status === 401) {
+            clearStoredAdminToken();
+            router.replace("/login");
+            return;
+          }
+          setProductsError(response.error || "Unable to load products at the moment.");
+          return;
+        }
+        setProducts(response.data?.products ?? []);
+        setProductsLoaded(true);
+      } catch {
+        setProductsError("Network error while loading products.");
+      } finally {
+        setProductsLoading(false);
+      }
+    };
+
+    fetchProducts();
+  }, [activeTab, isReady, productsLoaded, router, token]);
+
   const filteredLeads = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     return [...leads]
@@ -270,6 +364,29 @@ export default function DashboardPage() {
     const delivered = orders.filter((order) => order.orderStatus?.toLowerCase() === "delivered").length;
     return { total, pendingVerification, verified, delivered };
   }, [orders]);
+
+  const filteredProducts = useMemo(() => {
+    const normalizedSearch = productsSearch.trim().toLowerCase();
+    return [...products]
+      .filter((product) => {
+        const matchesSearch =
+          normalizedSearch.length === 0 ||
+          [product.name, product.description, product.category]
+            .filter(Boolean)
+            .some((field) => field.toLowerCase().includes(normalizedSearch));
+        const matchesCategory = productCategoryFilter === "all" || product.category?.toLowerCase() === productCategoryFilter.toLowerCase();
+        return matchesSearch && matchesCategory;
+      })
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  }, [products, productsSearch, productCategoryFilter]);
+
+  const productStats = useMemo(() => {
+    const total = products.length;
+    const active = products.filter((product) => product.isActive).length;
+    const inactive = products.filter((product) => !product.isActive).length;
+    const lowStock = products.filter((product) => product.stock < 10).length;
+    return { total, active, inactive, lowStock };
+  }, [products]);
 
   const handleLogout = () => {
     clearStoredAdminToken();
@@ -361,6 +478,147 @@ export default function DashboardPage() {
     }
   };
 
+  const openCreateProductModal = () => {
+    setProductFormMode("create");
+    setEditingProductId(null);
+    setProductForm(createEmptyProductForm());
+    setIsProductFormOpen(true);
+  };
+
+  const openEditProductModal = (product: Product) => {
+    setProductFormMode("edit");
+    setEditingProductId(product.id);
+    setProductForm({
+      name: product.name,
+      description: product.description,
+      category: product.category,
+      price: String(product.price),
+      originalPrice: product.originalPrice ? String(product.originalPrice) : "",
+      imagesText: product.images?.join(", ") || "",
+      stock: String(product.stock),
+      badge: product.badge || "",
+    });
+    setIsProductFormOpen(true);
+  };
+
+  const handleProductSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setProductSubmitting(true);
+    setProductsError("");
+
+    const payload = {
+      name: productForm.name.trim(),
+      description: productForm.description.trim(),
+      category: productForm.category.trim(),
+      price: Number(productForm.price),
+      originalPrice: productForm.originalPrice ? Number(productForm.originalPrice) : null,
+      images: productForm.imagesText
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean),
+      stock: Number(productForm.stock || 100),
+      badge: productForm.badge.trim() || null,
+    };
+
+    try {
+      const response = await authenticatedFetch<{ product: Product }> ("/api/products", {
+        method: productFormMode === "create" ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(productFormMode === "create" ? payload : { id: editingProductId, ...payload }),
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        setProductsError(response.error || "Unable to save the product.");
+        return;
+      }
+
+      const savedProduct = response.data?.product;
+      if (!savedProduct) {
+        setProductsError("The product could not be saved.");
+        return;
+      }
+
+      setProducts((current) => {
+        if (productFormMode === "create") {
+          return [savedProduct, ...current];
+        }
+        return current.map((product) => (product.id === savedProduct.id ? savedProduct : product));
+      });
+
+      setIsProductFormOpen(false);
+      setProductForm(createEmptyProductForm());
+      setEditingProductId(null);
+    } catch {
+      setProductsError("Network error while saving the product.");
+    } finally {
+      setProductSubmitting(false);
+    }
+  };
+
+  const handleProductToggle = async (id: string, nextValue: boolean) => {
+    const originalProduct = products.find((product) => product.id === id);
+    setPendingProductToggleId(id);
+    setProducts((current) => current.map((product) => (product.id === id ? { ...product, isActive: nextValue } : product)));
+
+    try {
+      const response = await authenticatedFetch<{ product: Product }> ("/api/products", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, isActive: nextValue }),
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        setProducts((current) => current.map((product) => (product.id === id ? { ...product, isActive: originalProduct?.isActive ?? true } : product)));
+        setProductsError(response.error || "Unable to update the product status.");
+      }
+    } catch {
+      setProducts((current) => current.map((product) => (product.id === id ? { ...product, isActive: originalProduct?.isActive ?? true } : product)));
+      setProductsError("Network error while updating the product status.");
+    } finally {
+      setPendingProductToggleId(null);
+    }
+  };
+
+  const handleDeleteProduct = async (id: string) => {
+    const productName = products.find((product) => product.id === id)?.name || "this product";
+    if (!window.confirm(`Delete ${productName}?`)) return;
+
+    const originalProducts = [...products];
+    setProducts((current) => current.filter((product) => product.id !== id));
+
+    try {
+      const response = await authenticatedFetch("/api/products?id=" + encodeURIComponent(id), {
+        method: "DELETE",
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        setProducts(originalProducts);
+        setProductsError(response.error || "Unable to delete the product.");
+      }
+    } catch {
+      setProducts(originalProducts);
+      setProductsError("Network error while deleting the product.");
+    }
+  };
+
   if (!isReady) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
@@ -415,6 +673,15 @@ export default function DashboardPage() {
             }`}
           >
             Orders
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("products")}
+            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+              activeTab === "products" ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            Products
           </button>
         </section>
 
@@ -532,6 +799,214 @@ export default function DashboardPage() {
                 </>
               )}
             </section>
+          </>
+        ) : activeTab === "products" ? (
+          <>
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Total Products" value={productStats.total} accent="bg-indigo-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4.5 5.5A1.5 1.5 0 016 4h8a1.5 1.5 0 011.5 1.5v2A1.5 1.5 0 0114 9H6A1.5 1.5 0 014.5 7.5v-2z" stroke="currentColor" strokeWidth="1.6" /><path d="M4.5 10.5A1.5 1.5 0 016 9h8a1.5 1.5 0 011.5 1.5v2A1.5 1.5 0 0114 14H6a1.5 1.5 0 01-1.5-1.5v-2z" stroke="currentColor" strokeWidth="1.6" /></svg>} />
+              <StatCard label="Active" value={productStats.active} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 10.5L8 14.5L16 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
+              <StatCard label="Inactive" value={productStats.inactive} accent="bg-slate-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M13.5 6.5L6.5 13.5M6.5 6.5L13.5 13.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
+              <StatCard label="Low Stock" value={productStats.lowStock} accent="bg-amber-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 3.5v7l4 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /></svg>} />
+            </section>
+
+            <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                <div className="grid flex-1 gap-3 lg:grid-cols-2">
+                  <div>
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search</span>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400"><svg viewBox="0 0 20 20" fill="none" className="h-4 w-4"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" /><path d="M13.5 13.5L17 17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg></div>
+                      <input type="search" value={productsSearch} onChange={(event) => setProductsSearch(event.target.value)} placeholder="Name, description or category" className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" />
+                    </div>
+                  </div>
+                  <div>
+                    <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Category</span>
+                    <select value={productCategoryFilter} onChange={(event) => setProductCategoryFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15">
+                      <option value="all">All Categories</option>
+                      {productCategories.map((category) => (
+                        <option key={category} value={category}>{category}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <button type="button" onClick={openCreateProductModal} className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500">
+                  Add New Product
+                </button>
+              </div>
+            </section>
+
+            <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              {productsLoading ? (
+                <div className="space-y-3 p-6">{Array.from({ length: 5 }).map((_, index) => <div key={index} className="animate-pulse rounded-xl bg-slate-100 px-4 py-4"><div className="h-4 w-1/4 rounded bg-slate-200" /></div>)}</div>
+              ) : productsError ? (
+                <div className="p-10 text-center">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50"><svg viewBox="0 0 20 20" fill="none" className="h-6 w-6 text-rose-500"><circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.5" /><path d="M10 6.5V10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="10" cy="13.3" r="0.9" fill="currentColor" /></svg></div>
+                  <p className="text-lg font-semibold text-slate-900">Something went wrong</p>
+                  <p className="mt-1 text-sm text-slate-600">{productsError}</p>
+                  <button type="button" onClick={() => setProductsLoaded(false)} className="mt-4 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500">Retry</button>
+                </div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="p-10 text-center">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100"><svg viewBox="0 0 20 20" fill="none" className="h-6 w-6 text-slate-400"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" /><path d="M13.5 13.5L17 17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg></div>
+                  <p className="text-lg font-semibold text-slate-900">No products found</p>
+                  <p className="mt-1 text-sm text-slate-600">Try adjusting your search or filters to see more results.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="hidden overflow-x-auto md:block">
+                    <table className="min-w-full divide-y divide-slate-100 text-left text-sm">
+                      <thead className="bg-slate-50/80">
+                        <tr>
+                          {['Product', 'Category', 'Price', 'Stock', 'Status', 'Actions'].map((header) => (
+                            <th key={header} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {filteredProducts.map((product) => {
+                          const isLowStock = product.stock < 10;
+                          const stockClasses = isLowStock ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200';
+                          const statusClasses = product.isActive ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200';
+                          return (
+                            <tr key={product.id} className="align-top transition hover:bg-slate-50/60">
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                                    {product.images?.[0] ? <img src={product.images[0]} alt={product.name} className="h-full w-full object-cover" /> : <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5 text-slate-400"><path d="M4 4.5h12v11H4z" stroke="currentColor" strokeWidth="1.4" /><path d="M7 8.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM16 13.5l-3-3-5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold text-slate-900">{product.name || '—'}</p>
+                                    <p className="mt-1 text-xs text-slate-500">{product.description || '—'}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4"><span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{product.category || '—'}</span></td>
+                              <td className="px-4 py-4">
+                                <div className="flex flex-col">
+                                  <span className="font-semibold text-slate-900">{formatCurrency(product.price)}</span>
+                                  {product.originalPrice && product.originalPrice > product.price ? <span className="text-xs text-slate-500 line-through">{formatCurrency(product.originalPrice)}</span> : null}
+                                </div>
+                              </td>
+                              <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${stockClasses}`}>{product.stock}</span></td>
+                              <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClasses}`}>{product.isActive ? 'Active' : 'Inactive'}</span></td>
+                              <td className="px-4 py-4">
+                                <div className="flex flex-wrap gap-2">
+                                  <button type="button" onClick={() => openEditProductModal(product)} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">Edit</button>
+                                  <button type="button" onClick={() => handleProductToggle(product.id, !product.isActive)} disabled={pendingProductToggleId === product.id} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60">{product.isActive ? 'Deactivate' : 'Activate'}</button>
+                                  <button type="button" onClick={() => handleDeleteProduct(product.id)} className="rounded-lg border border-rose-200 px-2.5 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50">Delete</button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="grid gap-4 p-4 md:hidden">
+                    {filteredProducts.map((product) => {
+                      const isLowStock = product.stock < 10;
+                      const stockClasses = isLowStock ? 'bg-rose-50 text-rose-700 ring-1 ring-rose-200' : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200';
+                      const statusClasses = product.isActive ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' : 'bg-slate-100 text-slate-700 ring-1 ring-slate-200';
+                      return (
+                        <article key={product.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                              {product.images?.[0] ? <img src={product.images[0]} alt={product.name} className="h-full w-full object-cover" /> : <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5 text-slate-400"><path d="M4 4.5h12v11H4z" stroke="currentColor" strokeWidth="1.4" /><path d="M7 8.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM16 13.5l-3-3-5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <h2 className="text-base font-semibold text-slate-900">{product.name || '—'}</h2>
+                              <p className="mt-1 text-sm text-slate-600">{product.description || '—'}</p>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid gap-1.5 text-sm text-slate-600">
+                            <p><span className="font-medium text-slate-900">Category:</span> {product.category || '—'}</p>
+                            <p><span className="font-medium text-slate-900">Price:</span> {formatCurrency(product.price)}{product.originalPrice && product.originalPrice > product.price ? <span className="ml-2 text-slate-500 line-through">{formatCurrency(product.originalPrice)}</span> : null}</p>
+                            <p><span className="font-medium text-slate-900">Stock:</span> <span className={`ml-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${stockClasses}`}>{product.stock}</span></p>
+                            <p><span className="font-medium text-slate-900">Status:</span> <span className={`ml-1 inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${statusClasses}`}>{product.isActive ? 'Active' : 'Inactive'}</span></p>
+                          </div>
+                          <div className="mt-4 flex flex-wrap gap-2">
+                            <button type="button" onClick={() => openEditProductModal(product)} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Edit</button>
+                            <button type="button" onClick={() => handleProductToggle(product.id, !product.isActive)} disabled={pendingProductToggleId === product.id} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60">{product.isActive ? 'Deactivate' : 'Activate'}</button>
+                            <button type="button" onClick={() => handleDeleteProduct(product.id)} className="rounded-lg border border-rose-200 px-2.5 py-1.5 text-sm font-semibold text-rose-700 transition hover:bg-rose-50">Delete</button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </section>
+
+            {isProductFormOpen ? (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+                <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900">{productFormMode === "create" ? "Add New Product" : "Edit Product"}</h3>
+                      <p className="mt-1 text-sm text-slate-600">Fill in the product details below.</p>
+                    </div>
+                    <button type="button" onClick={() => setIsProductFormOpen(false)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Close</button>
+                  </div>
+
+                  <form onSubmit={handleProductSubmit} className="mt-5 space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-1.5 text-sm font-medium text-slate-700">
+                        <span>Name</span>
+                        <input required value={productForm.name} onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="Product name" />
+                      </label>
+                      <label className="space-y-1.5 text-sm font-medium text-slate-700">
+                        <span>Category</span>
+                        <select required value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15">
+                          <option value="">Select category</option>
+                          {productCategories.map((category) => (
+                            <option key={category} value={category}>{category}</option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
+
+                    <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                      <span>Description</span>
+                      <textarea required rows={4} value={productForm.description} onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="Add product description" />
+                    </label>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-1.5 text-sm font-medium text-slate-700">
+                        <span>Price</span>
+                        <input required type="number" min="0" value={productForm.price} onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="0" />
+                      </label>
+                      <label className="space-y-1.5 text-sm font-medium text-slate-700">
+                        <span>Original Price (optional)</span>
+                        <input type="number" min="0" value={productForm.originalPrice} onChange={(event) => setProductForm((current) => ({ ...current, originalPrice: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="0" />
+                      </label>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <label className="space-y-1.5 text-sm font-medium text-slate-700">
+                        <span>Image URL(s)</span>
+                        <input value={productForm.imagesText} onChange={(event) => setProductForm((current) => ({ ...current, imagesText: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="https://..., https://..." />
+                      </label>
+                      <label className="space-y-1.5 text-sm font-medium text-slate-700">
+                        <span>Stock quantity</span>
+                        <input required type="number" min="0" value={productForm.stock} onChange={(event) => setProductForm((current) => ({ ...current, stock: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="100" />
+                      </label>
+                    </div>
+
+                    <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                      <span>Badge (optional)</span>
+                      <input value={productForm.badge} onChange={(event) => setProductForm((current) => ({ ...current, badge: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="Best Seller" />
+                    </label>
+
+                    <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+                      <button type="button" onClick={() => setIsProductFormOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancel</button>
+                      <button type="submit" disabled={productSubmitting} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">
+                        {productSubmitting ? "Saving..." : productFormMode === "create" ? "Create Product" : "Save Changes"}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            ) : null}
           </>
         ) : (
           <>

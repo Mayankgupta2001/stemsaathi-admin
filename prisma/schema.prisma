@@ -37,3 +37,20 @@ model Order {
   paymentProofNote String?
   createdAt        DateTime @default(now())
 }
+
+model Product {
+  id            String   @id @default(cuid())
+  name          String
+  description   String
+  category      String
+  price         Int
+  originalPrice Int?
+  images        String[]
+  rating        Float    @default(4.5)
+  reviewCount   Int      @default(0)
+  badge         String?
+  stock         Int      @default(100)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
