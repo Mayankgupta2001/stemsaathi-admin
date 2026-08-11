@@ -3,6 +3,9 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --color-brand-blue: #3b4cff;
+  --color-brand-teal: #17c3b2;
+  --color-brand-amber: #f5a524;
 }
 
 @theme inline {
@@ -10,6 +13,9 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-brand-blue: var(--color-brand-blue);
+  --color-brand-teal: var(--color-brand-teal);
+  --color-brand-amber: var(--color-brand-amber);
 }
 
 @media (prefers-color-scheme: dark) {

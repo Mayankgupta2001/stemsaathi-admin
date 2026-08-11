@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import { useRouter } from "next/navigation";
 import { authenticatedFetch } from "@/lib/api";
 import { clearStoredAdminToken, useAdminAuthGuard } from "@/lib/auth";
+import AdminLayout from "@/components/AdminLayout";
 
 type LeadStatus = "new" | "contacted" | "converted";
 type LeadSource = "contact" | "book-demo" | "welcome-modal";
@@ -191,6 +192,43 @@ function StatCard({
   );
 }
 
+function SimpleBarChart({
+  title,
+  data,
+  colors,
+}: {
+  title: string;
+  data: { label: string; value: number }[];
+  colors: string[];
+}) {
+  const maxValue = Math.max(...data.map((d) => d.value), 1);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h3 className="mb-4 text-sm font-semibold text-slate-900">{title}</h3>
+      <div className="space-y-3">
+        {data.map((item, index) => (
+          <div key={item.label}>
+            <div className="mb-1 flex items-center justify-between text-xs">
+              <span className="font-medium text-slate-600">{item.label}</span>
+              <span className="font-bold text-slate-900">{item.value}</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${(item.value / maxValue) * 100}%`,
+                  backgroundColor: colors[index % colors.length],
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const { isReady, token } = useAdminAuthGuard({
@@ -198,7 +236,7 @@ export default function DashboardPage() {
     redirectPath: "/login",
   });
 
-  const [activeTab, setActiveTab] = useState<"leads" | "orders" | "products">("leads");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "leads" | "orders" | "products">("dashboard");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -260,7 +298,7 @@ export default function DashboardPage() {
   }, [isReady, router, token]);
 
   useEffect(() => {
-    if (!isReady || !token || activeTab !== "orders" || ordersLoaded) return;
+    if (!isReady || !token || ordersLoaded) return;
 
     const fetchOrders = async () => {
       setOrdersLoading(true);
@@ -289,7 +327,7 @@ export default function DashboardPage() {
   }, [activeTab, isReady, ordersLoaded, router, token]);
 
   useEffect(() => {
-    if (!isReady || !token || activeTab !== "products" || productsLoaded) return;
+    if (!isReady || !token || productsLoaded) return;
 
     const fetchProducts = async () => {
       setProductsLoading(true);
@@ -363,6 +401,40 @@ export default function DashboardPage() {
     const verified = orders.filter((order) => order.paymentStatus?.toLowerCase() === "verified").length;
     const delivered = orders.filter((order) => order.orderStatus?.toLowerCase() === "delivered").length;
     return { total, pendingVerification, verified, delivered };
+  }, [orders]);
+
+  const totalRevenue = useMemo(() => {
+    return orders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
+  }, [orders]);
+
+  const leadsBySource = useMemo(() => {
+    const counts: Record<string, number> = { contact: 0, "book-demo": 0, "welcome-modal": 0 };
+    leads.forEach((lead) => {
+      const key = lead.source?.toLowerCase();
+      if (key && counts[key] !== undefined) counts[key]++;
+    });
+    return counts;
+  }, [leads]);
+
+  const ordersByPayment = useMemo(() => {
+    const counts: Record<string, number> = { pending_verification: 0, verified: 0, rejected: 0 };
+    orders.forEach((order) => {
+      const key = order.paymentStatus?.toLowerCase();
+      if (key && counts[key] !== undefined) counts[key]++;
+    });
+    return counts;
+  }, [orders]);
+
+  const recentLeads = useMemo(() => {
+    return [...leads]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5);
+  }, [leads]);
+
+  const recentOrders = useMemo(() => {
+    return [...orders]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 5);
   }, [orders]);
 
   const filteredProducts = useMemo(() => {
@@ -628,67 +700,93 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-500 text-sm font-bold text-white shadow-sm">
-              SS
-            </div>
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-600">STEMSaathi</p>
-              <h1 className="text-lg font-bold leading-tight text-slate-900 sm:text-xl">Admin Dashboard</h1>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
-          >
-            <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
-              <path d="M13 14V15.5C13 16.33 12.33 17 11.5 17H5.5C4.67 17 4 16.33 4 15.5V4.5C4 3.67 4.67 3 5.5 3H11.5C12.33 3 13 3.67 13 4.5V6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              <path d="M8 10H17M17 10L14 7M17 10L14 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Logout
-          </button>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <section className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-          <button
-            type="button"
-            onClick={() => setActiveTab("leads")}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              activeTab === "leads" ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            Leads
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("orders")}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              activeTab === "orders" ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            Orders
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("products")}
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
-              activeTab === "products" ? "bg-indigo-600 text-white shadow-sm" : "bg-white text-slate-600 hover:bg-slate-50"
-            }`}
-          >
-            Products
-          </button>
-        </section>
-
-        {activeTab === "leads" ? (
+    <AdminLayout activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout}>
+        {activeTab === "dashboard" ? (
           <>
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Total Leads" value={stats.total} accent="bg-indigo-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 10.5a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.6" /><path d="M4 16.5c0-2.76 2.69-5 6-5s6 2.24 6 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
+              <StatCard label="Total Leads" value={stats.total} accent="bg-brand-blue" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 10.5a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.6" /><path d="M4 16.5c0-2.76 2.69-5 6-5s6 2.24 6 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
+              <StatCard label="Total Orders" value={orderStats.total} accent="bg-brand-teal" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 4.5h12l-1 7H5l-1-7z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>} />
+              <StatCard label="Total Revenue" value={totalRevenue} accent="bg-brand-amber" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /><path d="M10 6.5v7M7.5 8.5h4a1.5 1.5 0 010 3h-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>} />
+              <StatCard label="Total Products" value={productStats.total} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 3l6.5 3.5v7L10 17l-6.5-3.5v-7L10 3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>} />
+            </section>
+
+            <section className="mt-6 grid gap-4 lg:grid-cols-2">
+              <SimpleBarChart
+                title="Leads by Source"
+                data={[
+                  { label: "Contact", value: leadsBySource["contact"] },
+                  { label: "Book Demo", value: leadsBySource["book-demo"] },
+                  { label: "Welcome Modal", value: leadsBySource["welcome-modal"] },
+                ]}
+                colors={["#3B4CFF", "#8B5CF6", "#17C3B2"]}
+              />
+              <SimpleBarChart
+                title="Orders by Payment Status"
+                data={[
+                  { label: "Pending Verification", value: ordersByPayment["pending_verification"] },
+                  { label: "Verified", value: ordersByPayment["verified"] },
+                  { label: "Rejected", value: ordersByPayment["rejected"] },
+                ]}
+                colors={["#F5A524", "#10B981", "#F43F5E"]}
+              />
+            </section>
+
+            <section className="mt-6 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                  <h3 className="text-sm font-semibold text-slate-900">Recent Leads</h3>
+                  <button type="button" onClick={() => setActiveTab("leads")} className="text-xs font-semibold text-brand-blue hover:underline">View All</button>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {recentLeads.length === 0 ? (
+                    <p className="px-5 py-6 text-sm text-slate-500">No leads yet.</p>
+                  ) : (
+                    recentLeads.map((lead) => (
+                      <div key={lead.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(lead.fullName)}`}>{initials(lead.fullName)}</div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{lead.fullName || "—"}</p>
+                            <p className="text-xs text-slate-500">{lead.source}</p>
+                          </div>
+                        </div>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${statusStyles[lead.status?.toLowerCase()]?.badge || "bg-slate-100 text-slate-700"}`}>{lead.status}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                  <h3 className="text-sm font-semibold text-slate-900">Recent Orders</h3>
+                  <button type="button" onClick={() => setActiveTab("orders")} className="text-xs font-semibold text-brand-blue hover:underline">View All</button>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {recentOrders.length === 0 ? (
+                    <p className="px-5 py-6 text-sm text-slate-500">No orders yet.</p>
+                  ) : (
+                    recentOrders.map((order) => (
+                      <div key={order.id} className="flex items-center justify-between gap-3 px-5 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(order.customerName)}`}>{initials(order.customerName)}</div>
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{order.customerName || "—"}</p>
+                            <p className="text-xs text-slate-500">{formatCurrency(order.totalAmount)}</p>
+                          </div>
+                        </div>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${paymentStatusStyles[order.paymentStatus?.toLowerCase()] || "bg-slate-100 text-slate-700"}`}>{order.paymentStatus}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </section>
+          </>
+        ) : activeTab === "leads" ? (
+          <>
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Total Leads" value={stats.total} accent="bg-brand-blue" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 10.5a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.6" /><path d="M4 16.5c0-2.76 2.69-5 6-5s6 2.24 6 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
               <StatCard label="New" value={stats.newCount} accent="bg-amber-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /><path d="M10 6.5V10.5L12.5 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
               <StatCard label="Contacted" value={stats.contactedCount} accent="bg-sky-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M3.5 5.5A1.5 1.5 0 015 4h10a1.5 1.5 0 011.5 1.5v6A1.5 1.5 0 0115 13H8l-3.5 3V13H5a1.5 1.5 0 01-1.5-1.5v-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>} />
               <StatCard label="Converted" value={stats.convertedCount} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 10.5L8 14.5L16 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
@@ -702,12 +800,12 @@ export default function DashboardPage() {
                     <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
                       <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" /><path d="M13.5 13.5L17 17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
                     </div>
-                    <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, phone or school" className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" />
+                    <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, phone or school" className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
                   </div>
                 </div>
                 <div>
                   <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Source</span>
-                  <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15">
+                  <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
                     <option value="all">All Sources</option>
                     <option value="contact">Contact</option>
                     <option value="book-demo">Book Demo</option>
@@ -716,7 +814,7 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Status</span>
-                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15">
+                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
                     <option value="all">All Statuses</option>
                     <option value="new">New</option>
                     <option value="contacted">Contacted</option>
@@ -734,7 +832,7 @@ export default function DashboardPage() {
                   <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50"><svg viewBox="0 0 20 20" fill="none" className="h-6 w-6 text-rose-500"><circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.5" /><path d="M10 6.5V10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="10" cy="13.3" r="0.9" fill="currentColor" /></svg></div>
                   <p className="text-lg font-semibold text-slate-900">Something went wrong</p>
                   <p className="mt-1 text-sm text-slate-600">{error}</p>
-                  <button type="button" onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500">Retry</button>
+                  <button type="button" onClick={() => window.location.reload()} className="mt-4 rounded-xl bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90">Retry</button>
                 </div>
               ) : filteredLeads.length === 0 ? (
                 <div className="p-10 text-center">
@@ -760,14 +858,14 @@ export default function DashboardPage() {
                           return (
                             <tr key={lead.id} className="align-top transition hover:bg-slate-50/60">
                               <td className="px-4 py-4"><div className="flex items-center gap-3"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(lead.fullName)}`}>{initials(lead.fullName)}</div><span className="font-semibold text-slate-900">{lead.fullName || '—'}</span></div></td>
-                              <td className="px-4 py-4"><a href={`tel:${lead.phone}`} className="text-indigo-600 hover:underline">{lead.phone || '—'}</a></td>
+                              <td className="px-4 py-4"><a href={`tel:${lead.phone}`} className="text-brand-blue hover:underline">{lead.phone || '—'}</a></td>
                               <td className="px-4 py-4 text-slate-700">{lead.schoolName || '—'}</td>
                               <td className="px-4 py-4 text-slate-700">{lead.city || '—'}</td>
                               <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${sourceStyles[lead.source] || 'bg-slate-100 text-slate-700'}`}>{lead.source || '—'}</span></td>
                               <td className="px-4 py-4 text-slate-700">{lead.enquiryType || '—'}</td>
                               <td className="px-4 py-4"><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle.badge}`}><span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`} />{lead.status || '—'}</span></td>
                               <td className="px-4 py-4 whitespace-nowrap text-slate-600">{formatDate(lead.createdAt)}</td>
-                              <td className="px-4 py-4"><div className="flex flex-col gap-2"><select value={lead.status || 'new'} onChange={(event) => handleStatusChange(lead.id, event.target.value)} disabled={pendingStatusId === lead.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"><option value="new">New</option><option value="contacted">Contacted</option><option value="converted">Converted</option></select>{lead.message ? <button type="button" onClick={() => setExpandedMessages((current) => ({ ...current, [lead.id]: !current[lead.id] }))} className="text-left text-xs font-semibold text-indigo-600 hover:underline">{expandedMessages[lead.id] ? 'Hide message' : 'View message'}</button> : null}{lead.message && expandedMessages[lead.id] ? <div className="max-w-xs rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">{lead.message}</div> : null}</div></td>
+                              <td className="px-4 py-4"><div className="flex flex-col gap-2"><select value={lead.status || 'new'} onChange={(event) => handleStatusChange(lead.id, event.target.value)} disabled={pendingStatusId === lead.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="new">New</option><option value="contacted">Contacted</option><option value="converted">Converted</option></select>{lead.message ? <button type="button" onClick={() => setExpandedMessages((current) => ({ ...current, [lead.id]: !current[lead.id] }))} className="text-left text-xs font-semibold text-brand-blue hover:underline">{expandedMessages[lead.id] ? 'Hide message' : 'View message'}</button> : null}{lead.message && expandedMessages[lead.id] ? <div className="max-w-xs rounded-xl bg-slate-50 p-3 text-xs leading-relaxed text-slate-700">{lead.message}</div> : null}</div></td>
                             </tr>
                           );
                         })}
@@ -781,7 +879,7 @@ export default function DashboardPage() {
                       return (
                         <article key={lead.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
                           <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-center gap-3"><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${avatarColor(lead.fullName)}`}>{initials(lead.fullName)}</div><div><h2 className="text-base font-semibold text-slate-900">{lead.fullName || '—'}</h2><a href={`tel:${lead.phone}`} className="text-sm text-indigo-600 hover:underline">{lead.phone || '—'}</a></div></div>
+                            <div className="flex items-center gap-3"><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${avatarColor(lead.fullName)}`}>{initials(lead.fullName)}</div><div><h2 className="text-base font-semibold text-slate-900">{lead.fullName || '—'}</h2><a href={`tel:${lead.phone}`} className="text-sm text-brand-blue hover:underline">{lead.phone || '—'}</a></div></div>
                             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${statusStyle.badge}`}><span className={`h-1.5 w-1.5 rounded-full ${statusStyle.dot}`} />{lead.status || '—'}</span>
                           </div>
                           <div className="mt-3 grid gap-1.5 text-sm text-slate-600">
@@ -791,7 +889,7 @@ export default function DashboardPage() {
                             <p><span className="font-medium text-slate-900">Enquiry:</span> {lead.enquiryType || '—'}</p>
                             <p><span className="font-medium text-slate-900">Date:</span> {formatDate(lead.createdAt)}</p>
                           </div>
-                          <div className="mt-4 flex flex-col gap-2"><select value={lead.status || 'new'} onChange={(event) => handleStatusChange(lead.id, event.target.value)} disabled={pendingStatusId === lead.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"><option value="new">New</option><option value="contacted">Contacted</option><option value="converted">Converted</option></select>{lead.message ? <button type="button" onClick={() => setExpandedMessages((current) => ({ ...current, [lead.id]: !current[lead.id] }))} className="text-left text-sm font-semibold text-indigo-600 hover:underline">{expandedMessages[lead.id] ? 'Hide message' : 'View message'}</button> : null}{lead.message && expandedMessages[lead.id] ? <div className="rounded-xl bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">{lead.message}</div> : null}</div>
+                          <div className="mt-4 flex flex-col gap-2"><select value={lead.status || 'new'} onChange={(event) => handleStatusChange(lead.id, event.target.value)} disabled={pendingStatusId === lead.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="new">New</option><option value="contacted">Contacted</option><option value="converted">Converted</option></select>{lead.message ? <button type="button" onClick={() => setExpandedMessages((current) => ({ ...current, [lead.id]: !current[lead.id] }))} className="text-left text-sm font-semibold text-brand-blue hover:underline">{expandedMessages[lead.id] ? 'Hide message' : 'View message'}</button> : null}{lead.message && expandedMessages[lead.id] ? <div className="rounded-xl bg-slate-50 p-3 text-sm leading-relaxed text-slate-700">{lead.message}</div> : null}</div>
                         </article>
                       );
                     })}
@@ -803,7 +901,7 @@ export default function DashboardPage() {
         ) : activeTab === "products" ? (
           <>
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Total Products" value={productStats.total} accent="bg-indigo-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4.5 5.5A1.5 1.5 0 016 4h8a1.5 1.5 0 011.5 1.5v2A1.5 1.5 0 0114 9H6A1.5 1.5 0 014.5 7.5v-2z" stroke="currentColor" strokeWidth="1.6" /><path d="M4.5 10.5A1.5 1.5 0 016 9h8a1.5 1.5 0 011.5 1.5v2A1.5 1.5 0 0114 14H6a1.5 1.5 0 01-1.5-1.5v-2z" stroke="currentColor" strokeWidth="1.6" /></svg>} />
+              <StatCard label="Total Products" value={productStats.total} accent="bg-brand-blue" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4.5 5.5A1.5 1.5 0 016 4h8a1.5 1.5 0 011.5 1.5v2A1.5 1.5 0 0114 9H6A1.5 1.5 0 014.5 7.5v-2z" stroke="currentColor" strokeWidth="1.6" /><path d="M4.5 10.5A1.5 1.5 0 016 9h8a1.5 1.5 0 011.5 1.5v2A1.5 1.5 0 0114 14H6a1.5 1.5 0 01-1.5-1.5v-2z" stroke="currentColor" strokeWidth="1.6" /></svg>} />
               <StatCard label="Active" value={productStats.active} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 10.5L8 14.5L16 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
               <StatCard label="Inactive" value={productStats.inactive} accent="bg-slate-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M13.5 6.5L6.5 13.5M6.5 6.5L13.5 13.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
               <StatCard label="Low Stock" value={productStats.lowStock} accent="bg-amber-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 3.5v7l4 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /></svg>} />
@@ -816,12 +914,12 @@ export default function DashboardPage() {
                     <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search</span>
                     <div className="relative">
                       <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400"><svg viewBox="0 0 20 20" fill="none" className="h-4 w-4"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" /><path d="M13.5 13.5L17 17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg></div>
-                      <input type="search" value={productsSearch} onChange={(event) => setProductsSearch(event.target.value)} placeholder="Name, description or category" className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" />
+                      <input type="search" value={productsSearch} onChange={(event) => setProductsSearch(event.target.value)} placeholder="Name, description or category" className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
                     </div>
                   </div>
                   <div>
                     <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Category</span>
-                    <select value={productCategoryFilter} onChange={(event) => setProductCategoryFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15">
+                    <select value={productCategoryFilter} onChange={(event) => setProductCategoryFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
                       <option value="all">All Categories</option>
                       {productCategories.map((category) => (
                         <option key={category} value={category}>{category}</option>
@@ -829,7 +927,7 @@ export default function DashboardPage() {
                     </select>
                   </div>
                 </div>
-                <button type="button" onClick={openCreateProductModal} className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500">
+                <button type="button" onClick={openCreateProductModal} className="inline-flex items-center justify-center rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90">
                   Add New Product
                 </button>
               </div>
@@ -843,7 +941,7 @@ export default function DashboardPage() {
                   <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50"><svg viewBox="0 0 20 20" fill="none" className="h-6 w-6 text-rose-500"><circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.5" /><path d="M10 6.5V10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="10" cy="13.3" r="0.9" fill="currentColor" /></svg></div>
                   <p className="text-lg font-semibold text-slate-900">Something went wrong</p>
                   <p className="mt-1 text-sm text-slate-600">{productsError}</p>
-                  <button type="button" onClick={() => setProductsLoaded(false)} className="mt-4 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500">Retry</button>
+                  <button type="button" onClick={() => setProductsLoaded(false)} className="mt-4 rounded-xl bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90">Retry</button>
                 </div>
               ) : filteredProducts.length === 0 ? (
                 <div className="p-10 text-center">
@@ -952,11 +1050,11 @@ export default function DashboardPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="space-y-1.5 text-sm font-medium text-slate-700">
                         <span>Name</span>
-                        <input required value={productForm.name} onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="Product name" />
+                        <input required value={productForm.name} onChange={(event) => setProductForm((current) => ({ ...current, name: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" placeholder="Product name" />
                       </label>
                       <label className="space-y-1.5 text-sm font-medium text-slate-700">
                         <span>Category</span>
-                        <select required value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15">
+                        <select required value={productForm.category} onChange={(event) => setProductForm((current) => ({ ...current, category: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
                           <option value="">Select category</option>
                           {productCategories.map((category) => (
                             <option key={category} value={category}>{category}</option>
@@ -967,39 +1065,39 @@ export default function DashboardPage() {
 
                     <label className="block space-y-1.5 text-sm font-medium text-slate-700">
                       <span>Description</span>
-                      <textarea required rows={4} value={productForm.description} onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="Add product description" />
+                      <textarea required rows={4} value={productForm.description} onChange={(event) => setProductForm((current) => ({ ...current, description: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" placeholder="Add product description" />
                     </label>
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="space-y-1.5 text-sm font-medium text-slate-700">
                         <span>Price</span>
-                        <input required type="number" min="0" value={productForm.price} onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="0" />
+                        <input required type="number" min="0" value={productForm.price} onChange={(event) => setProductForm((current) => ({ ...current, price: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" placeholder="0" />
                       </label>
                       <label className="space-y-1.5 text-sm font-medium text-slate-700">
                         <span>Original Price (optional)</span>
-                        <input type="number" min="0" value={productForm.originalPrice} onChange={(event) => setProductForm((current) => ({ ...current, originalPrice: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="0" />
+                        <input type="number" min="0" value={productForm.originalPrice} onChange={(event) => setProductForm((current) => ({ ...current, originalPrice: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" placeholder="0" />
                       </label>
                     </div>
 
                     <div className="grid gap-4 md:grid-cols-2">
                       <label className="space-y-1.5 text-sm font-medium text-slate-700">
                         <span>Image URL(s)</span>
-                        <input value={productForm.imagesText} onChange={(event) => setProductForm((current) => ({ ...current, imagesText: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="https://..., https://..." />
+                        <input value={productForm.imagesText} onChange={(event) => setProductForm((current) => ({ ...current, imagesText: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" placeholder="https://..., https://..." />
                       </label>
                       <label className="space-y-1.5 text-sm font-medium text-slate-700">
                         <span>Stock quantity</span>
-                        <input required type="number" min="0" value={productForm.stock} onChange={(event) => setProductForm((current) => ({ ...current, stock: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="100" />
+                        <input required type="number" min="0" value={productForm.stock} onChange={(event) => setProductForm((current) => ({ ...current, stock: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" placeholder="100" />
                       </label>
                     </div>
 
                     <label className="block space-y-1.5 text-sm font-medium text-slate-700">
                       <span>Badge (optional)</span>
-                      <input value={productForm.badge} onChange={(event) => setProductForm((current) => ({ ...current, badge: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" placeholder="Best Seller" />
+                      <input value={productForm.badge} onChange={(event) => setProductForm((current) => ({ ...current, badge: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" placeholder="Best Seller" />
                     </label>
 
                     <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
                       <button type="button" onClick={() => setIsProductFormOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancel</button>
-                      <button type="submit" disabled={productSubmitting} className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60">
+                      <button type="submit" disabled={productSubmitting} className="rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
                         {productSubmitting ? "Saving..." : productFormMode === "create" ? "Create Product" : "Save Changes"}
                       </button>
                     </div>
@@ -1011,10 +1109,10 @@ export default function DashboardPage() {
         ) : (
           <>
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Total Orders" value={orderStats.total} accent="bg-indigo-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 4.5h12l-1 7H5l-1-7z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><path d="M7 13.5h1.5M12 13.5h1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
+              <StatCard label="Total Orders" value={orderStats.total} accent="bg-brand-blue" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 4.5h12l-1 7H5l-1-7z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><path d="M7 13.5h1.5M12 13.5h1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
               <StatCard label="Pending Verification" value={orderStats.pendingVerification} accent="bg-amber-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 3.5v7l4 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /></svg>} />
               <StatCard label="Verified" value={orderStats.verified} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 10.5L8 14.5L16 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
-              <StatCard label="Delivered" value={orderStats.delivered} accent="bg-sky-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 6.5h10l2 3v4H4v-7z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><circle cx="7.5" cy="13.5" r="1.2" fill="currentColor" /><circle cx="13.5" cy="13.5" r="1.2" fill="currentColor" /></svg>} />
+              <StatCard label="Delivered" value={orderStats.delivered} accent="bg-brand-teal" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 6.5h10l2 3v4H4v-7z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><circle cx="7.5" cy="13.5" r="1.2" fill="currentColor" /><circle cx="13.5" cy="13.5" r="1.2" fill="currentColor" /></svg>} />
             </section>
 
             <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -1023,12 +1121,12 @@ export default function DashboardPage() {
                   <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search</span>
                   <div className="relative">
                     <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400"><svg viewBox="0 0 20 20" fill="none" className="h-4 w-4"><circle cx="9" cy="9" r="6" stroke="currentColor" strokeWidth="1.6" /><path d="M13.5 13.5L17 17" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg></div>
-                    <input type="search" value={ordersSearch} onChange={(event) => setOrdersSearch(event.target.value)} placeholder="Customer or phone" className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15" />
+                    <input type="search" value={ordersSearch} onChange={(event) => setOrdersSearch(event.target.value)} placeholder="Customer or phone" className="w-full rounded-xl border border-slate-300 py-2.5 pl-9 pr-3 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
                   </div>
                 </div>
                 <div>
                   <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Payment Status</span>
-                  <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15">
+                  <select value={paymentFilter} onChange={(event) => setPaymentFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
                     <option value="all">All</option>
                     <option value="pending_verification">Pending Verification</option>
                     <option value="verified">Verified</option>
@@ -1037,7 +1135,7 @@ export default function DashboardPage() {
                 </div>
                 <div>
                   <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">Order Status</span>
-                  <select value={orderFilter} onChange={(event) => setOrderFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15">
+                  <select value={orderFilter} onChange={(event) => setOrderFilter(event.target.value)} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
                     <option value="all">All</option>
                     <option value="processing">Processing</option>
                     <option value="shipped">Shipped</option>
@@ -1056,7 +1154,7 @@ export default function DashboardPage() {
                   <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50"><svg viewBox="0 0 20 20" fill="none" className="h-6 w-6 text-rose-500"><circle cx="10" cy="10" r="7.5" stroke="currentColor" strokeWidth="1.5" /><path d="M10 6.5V10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><circle cx="10" cy="13.3" r="0.9" fill="currentColor" /></svg></div>
                   <p className="text-lg font-semibold text-slate-900">Something went wrong</p>
                   <p className="mt-1 text-sm text-slate-600">{ordersError}</p>
-                  <button type="button" onClick={() => setOrdersLoaded(false)} className="mt-4 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500">Retry</button>
+                  <button type="button" onClick={() => setOrdersLoaded(false)} className="mt-4 rounded-xl bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90">Retry</button>
                 </div>
               ) : filteredOrders.length === 0 ? (
                 <div className="p-10 text-center">
@@ -1084,15 +1182,15 @@ export default function DashboardPage() {
                           return (
                             <tr key={order.id} className="align-top transition hover:bg-slate-50/60">
                               <td className="px-4 py-4"><div className="flex items-center gap-3"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(order.customerName)}`}>{initials(order.customerName)}</div><div><p className="font-semibold text-slate-900">{order.customerName || '—'}</p><p className="text-xs text-slate-500">{order.email || '—'}</p></div></div></td>
-                              <td className="px-4 py-4"><a href={`tel:${order.phone}`} className="text-indigo-600 hover:underline">{order.phone || '—'}</a></td>
+                              <td className="px-4 py-4"><a href={`tel:${order.phone}`} className="text-brand-blue hover:underline">{order.phone || '—'}</a></td>
                               <td className="px-4 py-4 text-slate-700">{order.schoolOrOrg || '—'}</td>
-                              <td className="px-4 py-4"><div className="space-y-2"><div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-900">{order.items?.length || 0} item{(order.items?.length || 0) === 1 ? '' : 's'}</span><button type="button" onClick={() => setExpandedItems((current) => ({ ...current, [order.id]: !current[order.id] }))} className="text-xs font-semibold text-indigo-600 hover:underline">{expandedItems[order.id] ? 'Hide items' : 'View items'}</button></div>{expandedItems[order.id] ? <div className="max-w-xs rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">{order.items?.map((item, index) => <div key={`${order.id}-${index}`} className="flex items-center justify-between gap-3 py-1"><span>{item.name || 'Unnamed item'}</span><span className="text-slate-500">{item.quantity} × {formatCurrency(item.price)}</span></div>)}</div> : null}</div></td>
+                              <td className="px-4 py-4"><div className="space-y-2"><div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-900">{order.items?.length || 0} item{(order.items?.length || 0) === 1 ? '' : 's'}</span><button type="button" onClick={() => setExpandedItems((current) => ({ ...current, [order.id]: !current[order.id] }))} className="text-xs font-semibold text-brand-blue hover:underline">{expandedItems[order.id] ? 'Hide items' : 'View items'}</button></div>{expandedItems[order.id] ? <div className="max-w-xs rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">{order.items?.map((item, index) => <div key={`${order.id}-${index}`} className="flex items-center justify-between gap-3 py-1"><span>{item.name || 'Unnamed item'}</span><span className="text-slate-500">{item.quantity} × {formatCurrency(item.price)}</span></div>)}</div> : null}</div></td>
                               <td className="px-4 py-4 whitespace-nowrap font-semibold text-slate-900">{formatCurrency(order.totalAmount)}</td>
                               <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${paymentStyle}`}>{order.paymentStatus || '—'}</span></td>
                               <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${orderStyle}`}>{order.orderStatus || '—'}</span></td>
                               <td className="px-4 py-4 text-slate-700">{order.paymentProofNote || '—'}</td>
                               <td className="px-4 py-4 whitespace-nowrap text-slate-600">{formatDate(order.createdAt)}</td>
-                              <td className="px-4 py-4"><div className="flex flex-col gap-2"><select value={order.paymentStatus || 'pending_verification'} onChange={(event) => handleOrderUpdate(order.id, 'paymentStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"><option value="pending_verification">Pending Verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={order.orderStatus || 'processing'} onChange={(event) => handleOrderUpdate(order.id, 'orderStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></div></td>
+                              <td className="px-4 py-4"><div className="flex flex-col gap-2"><select value={order.paymentStatus || 'pending_verification'} onChange={(event) => handleOrderUpdate(order.id, 'paymentStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="pending_verification">Pending Verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={order.orderStatus || 'processing'} onChange={(event) => handleOrderUpdate(order.id, 'orderStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></div></td>
                             </tr>
                           );
                         })}
@@ -1107,10 +1205,10 @@ export default function DashboardPage() {
                       const orderStyle = orderStatusStyles[orderKey] || orderStatusStyles.processing;
                       return (
                         <article key={order.id} className="rounded-2xl border border-slate-200 p-4 shadow-sm">
-                          <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${avatarColor(order.customerName)}`}>{initials(order.customerName)}</div><div><h2 className="text-base font-semibold text-slate-900">{order.customerName || '—'}</h2><a href={`tel:${order.phone}`} className="text-sm text-indigo-600 hover:underline">{order.phone || '—'}</a></div></div><div className="flex flex-col gap-2"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${paymentStyle}`}>{order.paymentStatus || '—'}</span><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${orderStyle}`}>{order.orderStatus || '—'}</span></div></div>
+                          <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${avatarColor(order.customerName)}`}>{initials(order.customerName)}</div><div><h2 className="text-base font-semibold text-slate-900">{order.customerName || '—'}</h2><a href={`tel:${order.phone}`} className="text-sm text-brand-blue hover:underline">{order.phone || '—'}</a></div></div><div className="flex flex-col gap-2"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${paymentStyle}`}>{order.paymentStatus || '—'}</span><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${orderStyle}`}>{order.orderStatus || '—'}</span></div></div>
                           <div className="mt-3 grid gap-1.5 text-sm text-slate-600"><p><span className="font-medium text-slate-900">School/Org:</span> {order.schoolOrOrg || '—'}</p><p><span className="font-medium text-slate-900">Total:</span> {formatCurrency(order.totalAmount)}</p><p><span className="font-medium text-slate-900">Proof/UTR:</span> {order.paymentProofNote || '—'}</p><p><span className="font-medium text-slate-900">Date:</span> {formatDate(order.createdAt)}</p></div>
-                          <div className="mt-3 space-y-2"><div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-900">{order.items?.length || 0} item{(order.items?.length || 0) === 1 ? '' : 's'}</span><button type="button" onClick={() => setExpandedItems((current) => ({ ...current, [order.id]: !current[order.id] }))} className="text-xs font-semibold text-indigo-600 hover:underline">{expandedItems[order.id] ? 'Hide items' : 'View items'}</button></div>{expandedItems[order.id] ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{order.items?.map((item, index) => <div key={`${order.id}-${index}`} className="flex items-center justify-between gap-3 py-1"><span>{item.name || 'Unnamed item'}</span><span className="text-slate-500">{item.quantity} × {formatCurrency(item.price)}</span></div>)}</div> : null}</div>
-                          <div className="mt-4 flex flex-col gap-2"><select value={order.paymentStatus || 'pending_verification'} onChange={(event) => handleOrderUpdate(order.id, 'paymentStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"><option value="pending_verification">Pending Verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={order.orderStatus || 'processing'} onChange={(event) => handleOrderUpdate(order.id, 'orderStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/15"><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></div>
+                          <div className="mt-3 space-y-2"><div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-900">{order.items?.length || 0} item{(order.items?.length || 0) === 1 ? '' : 's'}</span><button type="button" onClick={() => setExpandedItems((current) => ({ ...current, [order.id]: !current[order.id] }))} className="text-xs font-semibold text-brand-blue hover:underline">{expandedItems[order.id] ? 'Hide items' : 'View items'}</button></div>{expandedItems[order.id] ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{order.items?.map((item, index) => <div key={`${order.id}-${index}`} className="flex items-center justify-between gap-3 py-1"><span>{item.name || 'Unnamed item'}</span><span className="text-slate-500">{item.quantity} × {formatCurrency(item.price)}</span></div>)}</div> : null}</div>
+                          <div className="mt-4 flex flex-col gap-2"><select value={order.paymentStatus || 'pending_verification'} onChange={(event) => handleOrderUpdate(order.id, 'paymentStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="pending_verification">Pending Verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={order.orderStatus || 'processing'} onChange={(event) => handleOrderUpdate(order.id, 'orderStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></div>
                         </article>
                       );
                     })}
@@ -1120,7 +1218,6 @@ export default function DashboardPage() {
             </section>
           </>
         )}
-      </main>
-    </div>
+    </AdminLayout>
   );
 }
