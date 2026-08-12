@@ -253,6 +253,7 @@ export default function DashboardPage() {
   const [paymentFilter, setPaymentFilter] = useState("all");
   const [orderFilter, setOrderFilter] = useState("all");
   const [pendingOrderUpdateId, setPendingOrderUpdateId] = useState<string | null>(null);
+  const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({});
   const [ordersLoaded, setOrdersLoaded] = useState(false);
 
@@ -1181,16 +1182,66 @@ export default function DashboardPage() {
                           const orderStyle = orderStatusStyles[orderKey] || orderStatusStyles.processing;
                           return (
                             <tr key={order.id} className="align-top transition hover:bg-slate-50/60">
-                              <td className="px-4 py-4"><div className="flex items-center gap-3"><div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(order.customerName)}`}>{initials(order.customerName)}</div><div><p className="font-semibold text-slate-900">{order.customerName || '—'}</p><p className="text-xs text-slate-500">{order.email || '—'}</p></div></div></td>
-                              <td className="px-4 py-4"><a href={`tel:${order.phone}`} className="text-brand-blue hover:underline">{order.phone || '—'}</a></td>
+                              <td className="px-4 py-4">
+                                <div className="flex items-center gap-3">
+                                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${avatarColor(order.customerName)}`}>
+                                    {initials(order.customerName)}
+                                  </div>
+                                  <div>
+                                    <p className="font-semibold text-slate-900">{order.customerName || '—'}</p>
+                                    <p className="text-xs text-slate-500">{order.email || '—'}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-4 py-4">
+                                <a href={`tel:${order.phone}`} className="text-brand-blue hover:underline">{order.phone || '—'}</a>
+                              </td>
                               <td className="px-4 py-4 text-slate-700">{order.schoolOrOrg || '—'}</td>
-                              <td className="px-4 py-4"><div className="space-y-2"><div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-900">{order.items?.length || 0} item{(order.items?.length || 0) === 1 ? '' : 's'}</span><button type="button" onClick={() => setExpandedItems((current) => ({ ...current, [order.id]: !current[order.id] }))} className="text-xs font-semibold text-brand-blue hover:underline">{expandedItems[order.id] ? 'Hide items' : 'View items'}</button></div>{expandedItems[order.id] ? <div className="max-w-xs rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">{order.items?.map((item, index) => <div key={`${order.id}-${index}`} className="flex items-center justify-between gap-3 py-1"><span>{item.name || 'Unnamed item'}</span><span className="text-slate-500">{item.quantity} × {formatCurrency(item.price)}</span></div>)}</div> : null}</div></td>
+                              <td className="px-4 py-4">
+                                <div className="space-y-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-medium text-slate-900">{order.items?.length || 0} item{(order.items?.length || 0) === 1 ? '' : 's'}</span>
+                                    <button type="button" onClick={() => setExpandedItems((current) => ({ ...current, [order.id]: !current[order.id] }))} className="text-xs font-semibold text-brand-blue hover:underline">
+                                      {expandedItems[order.id] ? 'Hide items' : 'View items'}
+                                    </button>
+                                  </div>
+                                  {expandedItems[order.id] && (
+                                    <div className="max-w-xs rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+                                      {order.items?.map((item, index) => (
+                                        <div key={`${order.id}-${index}`} className="flex items-center justify-between gap-3 py-1">
+                                          <span>{item.name || 'Unnamed item'}</span>
+                                          <span className="text-slate-500">{item.quantity} × {formatCurrency(item.price)}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
                               <td className="px-4 py-4 whitespace-nowrap font-semibold text-slate-900">{formatCurrency(order.totalAmount)}</td>
-                              <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${paymentStyle}`}>{order.paymentStatus || '—'}</span></td>
-                              <td className="px-4 py-4"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${orderStyle}`}>{order.orderStatus || '—'}</span></td>
+                              <td className="px-4 py-4">
+                                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${paymentStyle}`}>{order.paymentStatus || '—'}</span>
+                              </td>
+                              <td className="px-4 py-4">
+                                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${orderStyle}`}>{order.orderStatus || '—'}</span>
+                              </td>
                               <td className="px-4 py-4 text-slate-700">{order.paymentProofNote || '—'}</td>
                               <td className="px-4 py-4 whitespace-nowrap text-slate-600">{formatDate(order.createdAt)}</td>
-                              <td className="px-4 py-4"><div className="flex flex-col gap-2"><select value={order.paymentStatus || 'pending_verification'} onChange={(event) => handleOrderUpdate(order.id, 'paymentStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="pending_verification">Pending Verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={order.orderStatus || 'processing'} onChange={(event) => handleOrderUpdate(order.id, 'orderStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></div></td>
+                              <td className="px-4 py-4">
+                                <div className="flex flex-col gap-2">
+                                  <button type="button" onClick={() => setViewingOrder(order)} className="rounded-lg border border-brand-blue/30 bg-brand-blue/5 px-2 py-1.5 text-xs font-semibold text-brand-blue transition hover:bg-brand-blue/10">View Details</button>
+                                  <select value={order.paymentStatus || 'pending_verification'} onChange={(event) => handleOrderUpdate(order.id, 'paymentStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
+                                    <option value="pending_verification">Pending Verification</option>
+                                    <option value="verified">Verified</option>
+                                    <option value="rejected">Rejected</option>
+                                  </select>
+                                  <select value={order.orderStatus || 'processing'} onChange={(event) => handleOrderUpdate(order.id, 'orderStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
+                                    <option value="processing">Processing</option>
+                                    <option value="shipped">Shipped</option>
+                                    <option value="delivered">Delivered</option>
+                                    <option value="cancelled">Cancelled</option>
+                                  </select>
+                                </div>
+                              </td>
                             </tr>
                           );
                         })}
@@ -1208,7 +1259,7 @@ export default function DashboardPage() {
                           <div className="flex items-start justify-between gap-3"><div className="flex items-center gap-3"><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${avatarColor(order.customerName)}`}>{initials(order.customerName)}</div><div><h2 className="text-base font-semibold text-slate-900">{order.customerName || '—'}</h2><a href={`tel:${order.phone}`} className="text-sm text-brand-blue hover:underline">{order.phone || '—'}</a></div></div><div className="flex flex-col gap-2"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${paymentStyle}`}>{order.paymentStatus || '—'}</span><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${orderStyle}`}>{order.orderStatus || '—'}</span></div></div>
                           <div className="mt-3 grid gap-1.5 text-sm text-slate-600"><p><span className="font-medium text-slate-900">School/Org:</span> {order.schoolOrOrg || '—'}</p><p><span className="font-medium text-slate-900">Total:</span> {formatCurrency(order.totalAmount)}</p><p><span className="font-medium text-slate-900">Proof/UTR:</span> {order.paymentProofNote || '—'}</p><p><span className="font-medium text-slate-900">Date:</span> {formatDate(order.createdAt)}</p></div>
                           <div className="mt-3 space-y-2"><div className="flex items-center gap-2"><span className="text-sm font-medium text-slate-900">{order.items?.length || 0} item{(order.items?.length || 0) === 1 ? '' : 's'}</span><button type="button" onClick={() => setExpandedItems((current) => ({ ...current, [order.id]: !current[order.id] }))} className="text-xs font-semibold text-brand-blue hover:underline">{expandedItems[order.id] ? 'Hide items' : 'View items'}</button></div>{expandedItems[order.id] ? <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">{order.items?.map((item, index) => <div key={`${order.id}-${index}`} className="flex items-center justify-between gap-3 py-1"><span>{item.name || 'Unnamed item'}</span><span className="text-slate-500">{item.quantity} × {formatCurrency(item.price)}</span></div>)}</div> : null}</div>
-                          <div className="mt-4 flex flex-col gap-2"><select value={order.paymentStatus || 'pending_verification'} onChange={(event) => handleOrderUpdate(order.id, 'paymentStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="pending_verification">Pending Verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={order.orderStatus || 'processing'} onChange={(event) => handleOrderUpdate(order.id, 'orderStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></div>
+                          <div className="mt-4 flex flex-col gap-2"><button type="button" onClick={() => setViewingOrder(order)} className="rounded-lg border border-brand-blue/30 bg-brand-blue/5 px-2.5 py-2 text-sm font-semibold text-brand-blue transition hover:bg-brand-blue/10">View Details</button><select value={order.paymentStatus || 'pending_verification'} onChange={(event) => handleOrderUpdate(order.id, 'paymentStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="pending_verification">Pending Verification</option><option value="verified">Verified</option><option value="rejected">Rejected</option></select><select value={order.orderStatus || 'processing'} onChange={(event) => handleOrderUpdate(order.id, 'orderStatus', event.target.value)} disabled={pendingOrderUpdateId === order.id} className="rounded-lg border border-slate-300 px-2 py-2 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"><option value="processing">Processing</option><option value="shipped">Shipped</option><option value="delivered">Delivered</option><option value="cancelled">Cancelled</option></select></div>                        
                         </article>
                       );
                     })}
@@ -1218,6 +1269,69 @@ export default function DashboardPage() {
             </section>
           </>
         )}
+
+        {viewingOrder ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Order Details</h3>
+                <p className="mt-1 text-sm text-slate-500">Order ID: {viewingOrder.id}</p>
+              </div>
+              <button type="button" onClick={() => setViewingOrder(null)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Close</button>
+            </div>
+
+            <div className="mt-5 grid gap-5">
+              {/* Customer Info */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Customer Information</h4>
+                <div className="grid gap-2.5 text-sm sm:grid-cols-2">
+                  <p><span className="font-medium text-slate-900">Name:</span> <span className="text-slate-700">{viewingOrder.customerName || "—"}</span></p>
+                  <p><span className="font-medium text-slate-900">Phone:</span> <a href={`tel:${viewingOrder.phone}`} className="text-brand-blue hover:underline">{viewingOrder.phone || "—"}</a></p>
+                  <p><span className="font-medium text-slate-900">Email:</span> <span className="text-slate-700">{viewingOrder.email || "—"}</span></p>
+                  <p><span className="font-medium text-slate-900">School/Org:</span> <span className="text-slate-700">{viewingOrder.schoolOrOrg || "—"}</span></p>
+                  <p className="sm:col-span-2"><span className="font-medium text-slate-900">Address:</span> <span className="text-slate-700">{viewingOrder.address || "—"}</span></p>
+                </div>
+              </div>
+
+              {/* Items */}
+              <div className="rounded-xl border border-slate-200 p-4">
+                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Items ({viewingOrder.items?.length || 0})</h4>
+                <div className="divide-y divide-slate-100">
+                  {viewingOrder.items?.map((item, index) => (
+                    <div key={index} className="flex items-center justify-between gap-3 py-2.5">
+                      <span className="text-sm font-medium text-slate-900">{item.name || "Unnamed item"}</span>
+                      <span className="text-sm text-slate-600">{item.quantity} × {formatCurrency(item.price)} = {formatCurrency(item.quantity * item.price)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 space-y-1.5 border-t border-slate-200 pt-3 text-sm">
+                  <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{formatCurrency(viewingOrder.subtotal)}</span></div>
+                  <div className="flex justify-between text-slate-600"><span>GST</span><span>{formatCurrency(viewingOrder.gstAmount)}</span></div>
+                  <div className="flex justify-between text-slate-600"><span>Delivery Fee</span><span>{viewingOrder.deliveryFee > 0 ? formatCurrency(viewingOrder.deliveryFee) : "FREE"}</span></div>
+                  <div className="flex justify-between border-t border-slate-200 pt-1.5 text-base font-bold text-slate-900"><span>Total</span><span>{formatCurrency(viewingOrder.totalAmount)}</span></div>
+                </div>
+              </div>
+
+              {/* Payment & Status */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <h4 className="mb-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Payment & Fulfillment</h4>
+                <div className="grid gap-2.5 text-sm sm:grid-cols-2">
+                  <p><span className="font-medium text-slate-900">Payment Status:</span> <span className={`ml-1.5 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${paymentStatusStyles[viewingOrder.paymentStatus?.toLowerCase()] || "bg-slate-100 text-slate-700"}`}>{viewingOrder.paymentStatus}</span></p>
+                  <p><span className="font-medium text-slate-900">Order Status:</span> <span className={`ml-1.5 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${orderStatusStyles[viewingOrder.orderStatus?.toLowerCase()] || "bg-slate-100 text-slate-700"}`}>{viewingOrder.orderStatus}</span></p>
+                  <p><span className="font-medium text-slate-900">UTR/Reference:</span> <span className="text-slate-700">{viewingOrder.paymentProofNote || "—"}</span></p>
+                  <p><span className="font-medium text-slate-900">Order Date:</span> <span className="text-slate-700">{formatDate(viewingOrder.createdAt)}</span></p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button type="button" onClick={() => setViewingOrder(null)} className="rounded-xl bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90">Close</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </AdminLayout>
   );
 }
