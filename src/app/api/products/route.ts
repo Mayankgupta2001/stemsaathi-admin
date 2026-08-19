@@ -19,16 +19,31 @@ function verifyToken(req: NextRequest): boolean {
   }
 }
 
-interface ImportProductInput {
-  name: string;
-  description?: string;
-  category: string;
-  price: number | string;
-  originalPrice?: number | string | null;
-  images?: string[];
-  stock?: number | string;
-  badge?: string | null;
+// -----------------------------------------------------------------------------
+// GET /api/products — list all products (used by the admin Products tab)
+// -----------------------------------------------------------------------------
+
+export async function GET(req: NextRequest) {
+  if (!verifyToken(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const products = await prisma.product.findMany({
+      orderBy: { createdAt: "desc" },
+    });
+
+    return NextResponse.json({ success: true, products }, { status: 200 });
+  } catch (error) {
+    console.error("Error fetching products:", error);
+    return NextResponse.json({ error: "Failed to fetch products." }, { status: 500 });
+  }
 }
+
+// -----------------------------------------------------------------------------
+// POST /api/products — create a SINGLE product (the "Add Product" form).
+// Bulk Excel import stays on its own route: /api/products/import
+// -----------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
   if (!verifyToken(req)) {
@@ -37,139 +52,182 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { products, duplicateMode = "skip" } = body as {
-      products: ImportProductInput[];
-      duplicateMode?: "skip" | "update" | "insert";
-    };
+    const { name, description, category, price, originalPrice, images, stock, badge } = body;
 
-    if (!Array.isArray(products) || products.length === 0) {
+    if (!name || !description || !category || price === undefined || price === null) {
       return NextResponse.json(
-        { error: "A non-empty array of products is required for import." },
+        { error: "Name, description, category, and price are required." },
         { status: 400 }
       );
     }
 
-    // Retrieve existing products for duplicate verification
-    const existingProducts = await prisma.product.findMany();
-    const existingMap = new Map<string, { id: string; name: string; category: string }>();
-
-    for (const ep of existingProducts) {
-      const key = ep.name.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
-      existingMap.set(key, { id: ep.id, name: ep.name, category: ep.category });
+    const parsedPrice = Number(price);
+    if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
+      return NextResponse.json({ error: "Price must be a valid non-negative number." }, { status: 400 });
     }
 
-    let importedCount = 0;
-    let updatedCount = 0;
-    let skippedCount = 0;
-    const errors: Array<{ product: string; reason: string }> = [];
+    const parsedOriginalPrice =
+      originalPrice === undefined || originalPrice === null || originalPrice === ""
+        ? null
+        : Number(originalPrice);
 
-    // Process each item with isolation to safely report errors and avoid halting on a single malformed row
-    for (const item of products) {
-      const rawName = String(item.name || "").trim();
-      if (!rawName) {
-        errors.push({ product: "Unknown (Empty name)", reason: "Product name is required." });
-        continue;
-      }
+    if (parsedOriginalPrice !== null && (Number.isNaN(parsedOriginalPrice) || parsedOriginalPrice < 0)) {
+      return NextResponse.json(
+        { error: "Original price must be a valid non-negative number." },
+        { status: 400 }
+      );
+    }
 
-      const parsedPrice = Math.round(Number(item.price));
+    const parsedStock = stock === undefined || stock === null ? 100 : Number(stock);
+    if (Number.isNaN(parsedStock) || parsedStock < 0) {
+      return NextResponse.json({ error: "Stock must be a valid non-negative number." }, { status: 400 });
+    }
+
+    const normalizedImages = Array.isArray(images)
+      ? images.filter((image): image is string => typeof image === "string" && image.trim().length > 0)
+      : [];
+
+    const product = await prisma.product.create({
+      data: {
+        name: String(name).trim(),
+        description: String(description).trim(),
+        category: String(category).trim(),
+        price: parsedPrice,
+        originalPrice: parsedOriginalPrice,
+        images: normalizedImages,
+        badge: badge ? String(badge).trim() : null,
+        stock: parsedStock,
+        rating: 4.5,
+        reviewCount: 0,
+        isActive: true,
+      },
+    });
+
+    return NextResponse.json({ success: true, product }, { status: 201 });
+  } catch (error) {
+    console.error("Error creating product:", error);
+    return NextResponse.json({ error: "Failed to create product." }, { status: 500 });
+  }
+}
+
+// -----------------------------------------------------------------------------
+// PATCH /api/products — update a single product (edit form + active/inactive toggle)
+// Body: { id, ...fieldsToUpdate }
+// -----------------------------------------------------------------------------
+
+export async function PATCH(req: NextRequest) {
+  if (!verifyToken(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const body = await req.json();
+    const { id, ...updates } = body;
+
+    if (!id) {
+      return NextResponse.json({ error: "Product ID is required." }, { status: 400 });
+    }
+
+    const updateData: Record<string, unknown> = {};
+
+    if (updates.name !== undefined) updateData.name = String(updates.name).trim();
+    if (updates.description !== undefined) updateData.description = String(updates.description).trim();
+    if (updates.category !== undefined) updateData.category = String(updates.category).trim();
+
+    if (updates.price !== undefined) {
+      const parsedPrice = Number(updates.price);
       if (Number.isNaN(parsedPrice) || parsedPrice < 0) {
-        errors.push({ product: rawName, reason: `Invalid selling price: ${item.price}` });
-        continue;
+        return NextResponse.json({ error: "Price must be a valid non-negative number." }, { status: 400 });
       }
-
-      const category = String(item.category || "Electronic Components").trim();
-      const description = String(item.description || `High-quality ${rawName} designed for STEM education and practical learning.`).trim();
-
-      const parsedOriginalPrice = item.originalPrice !== undefined && item.originalPrice !== null && item.originalPrice !== ""
-        ? Math.round(Number(item.originalPrice))
-        : null;
-
-      const parsedStock = item.stock !== undefined && item.stock !== null && !isNaN(Number(item.stock))
-        ? Number(item.stock)
-        : 100;
-
-      const normalizedImages = Array.isArray(item.images)
-        ? item.images.filter((img): img is string => typeof img === "string" && img.trim().length > 0)
-        : [];
-
-      const badge = item.badge ? String(item.badge).trim() : null;
-
-      const normalizedKey = rawName.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
-      const existingProduct = existingMap.get(normalizedKey);
-
-      if (existingProduct) {
-        if (duplicateMode === "skip") {
-          skippedCount++;
-          continue;
-        } else if (duplicateMode === "update") {
-          try {
-            await prisma.product.update({
-              where: { id: existingProduct.id },
-              data: {
-                name: rawName,
-                category,
-                description,
-                price: parsedPrice,
-                originalPrice: parsedOriginalPrice,
-                images: normalizedImages.length > 0 ? normalizedImages : undefined,
-                stock: parsedStock,
-                badge,
-              },
-            });
-            updatedCount++;
-          } catch (updateErr) {
-            errors.push({
-              product: rawName,
-              reason: `Failed to update existing product: ${(updateErr as Error).message}`,
-            });
-          }
-          continue;
-        }
-      }
-
-      // Insert new product
-      try {
-        await prisma.product.create({
-          data: {
-            name: rawName,
-            category,
-            description,
-            price: parsedPrice,
-            originalPrice: parsedOriginalPrice,
-            images: normalizedImages,
-            stock: parsedStock,
-            badge,
-            rating: 4.5,
-            reviewCount: 0,
-            isActive: true,
-          },
-        });
-        importedCount++;
-        existingMap.set(normalizedKey, { id: "new", name: rawName, category });
-      } catch (insertErr) {
-        errors.push({
-          product: rawName,
-          reason: `Database insertion error: ${(insertErr as Error).message}`,
-        });
-      }
+      updateData.price = parsedPrice;
     }
+
+    if (updates.originalPrice !== undefined) {
+      const parsedOriginalPrice =
+        updates.originalPrice === "" || updates.originalPrice === null ? null : Number(updates.originalPrice);
+      if (parsedOriginalPrice !== null && (Number.isNaN(parsedOriginalPrice) || parsedOriginalPrice < 0)) {
+        return NextResponse.json(
+          { error: "Original price must be a valid non-negative number." },
+          { status: 400 }
+        );
+      }
+      updateData.originalPrice = parsedOriginalPrice;
+    }
+
+    if (updates.images !== undefined) {
+      updateData.images = Array.isArray(updates.images)
+        ? updates.images.filter(
+            (image: unknown): image is string => typeof image === "string" && image.trim().length > 0
+          )
+        : [];
+    }
+
+    if (updates.stock !== undefined) {
+      const parsedStock = Number(updates.stock);
+      if (Number.isNaN(parsedStock) || parsedStock < 0) {
+        return NextResponse.json({ error: "Stock must be a valid non-negative number." }, { status: 400 });
+      }
+      updateData.stock = parsedStock;
+    }
+
+    if (updates.badge !== undefined) updateData.badge = updates.badge ? String(updates.badge).trim() : null;
+    if (updates.isActive !== undefined) updateData.isActive = Boolean(updates.isActive);
+
+    if (Object.keys(updateData).length === 0) {
+      return NextResponse.json({ error: "At least one field is required to update." }, { status: 400 });
+    }
+
+    const product = await prisma.product.update({
+      where: { id },
+      data: updateData,
+    });
+
+    return NextResponse.json({ success: true, product }, { status: 200 });
+  } catch (error) {
+    console.error("Error updating product:", error);
+    return NextResponse.json({ error: "Failed to update product." }, { status: 500 });
+  }
+}
+
+// -----------------------------------------------------------------------------
+// DELETE /api/products — bulk delete (also works for a single product).
+// Body: { ids: string[] }  — the admin UI always sends an array, even for
+// single-product delete, so we only need to support that one shape.
+// -----------------------------------------------------------------------------
+
+export async function DELETE(req: NextRequest) {
+  if (!verifyToken(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const body = await req.json().catch(() => ({}));
+    const { searchParams } = new URL(req.url);
+
+    // Support both { ids: [...] } (bulk, used by the current UI) and
+    // a single ?id=... query param, for backwards compatibility.
+    const idsFromBody = Array.isArray(body?.ids) ? body.ids.filter(Boolean) : [];
+    const singleIdFromQuery = searchParams.get("id");
+    const singleIdFromBody = body?.id;
+
+    const ids: string[] = idsFromBody.length > 0
+      ? idsFromBody
+      : [singleIdFromQuery, singleIdFromBody].filter((v): v is string => Boolean(v));
+
+    if (ids.length === 0) {
+      return NextResponse.json({ error: "At least one product ID is required." }, { status: 400 });
+    }
+
+    const result = await prisma.product.deleteMany({
+      where: { id: { in: ids } },
+    });
 
     return NextResponse.json(
-      {
-        success: true,
-        imported: importedCount,
-        updated: updatedCount,
-        skipped: skippedCount,
-        failed: errors.length,
-        errors,
-      },
+      { success: true, count: result.count, deletedIds: ids },
       { status: 200 }
     );
   } catch (error) {
-    console.error("Error importing products:", error);
-    return NextResponse.json(
-      { error: "Failed to process product import." },
-      { status: 500 }
-    );
+    console.error("Error deleting product(s):", error);
+    return NextResponse.json({ error: "Failed to delete product(s)." }, { status: 500 });
   }
 }
