@@ -140,7 +140,12 @@ function strictUrlEncode(str: string): string {
 
 const DEFAULT_IMAGE_FOLDER = "Electronic Components";
 
+// Only list categories here that actually have their own image folder on
+// disk. Anything not listed falls back to DEFAULT_IMAGE_FOLDER.
 const CATEGORY_IMAGE_FOLDER_MAP: Record<string, string> = {
+  "Electronic Components": "Electronic Components",
+  "3D Printers & Parts": "3D Printers & Parts",
+  "Mechanical Tools": "Mechanical Tools",
   // "Sensors": "Sensors",              // <-- uncomment once that folder exists
   // "STEM Kits": "STEM Kits",          // <-- uncomment once that folder exists
 };
@@ -176,12 +181,12 @@ export function buildProductImagePath(folder: string, filenameOrName: string): s
 }
 
 // -----------------------------------------------------------------------------
-// REAL FILES ON DISK (public/images/Electronic Components)
+// REAL FILES ON DISK, per image folder.
 // Source of truth: `dir` output from the frontend repo, 19 Aug 2026.
-// Update this list whenever new images are added.
+// Update the relevant list whenever new images are added to a folder.
 // -----------------------------------------------------------------------------
 
-const ACTUAL_IMAGE_FILES: string[] = [
+const ELECTRONIC_COMPONENTS_FILES: string[] = [
   "10000 Mh 5 volt Power Bank.jpg",
   "150 RPM BO Motor.jpg",
   "16x2 LCD display.jpg",
@@ -295,6 +300,73 @@ const ACTUAL_IMAGE_FILES: string[] = [
   "Wemos D1_R2.jpg",
 ];
 
+const THREE_D_PRINTERS_PARTS_FILES: string[] = [
+  "3D Printer Kit and tools.jpg",
+  "Cardboard.jpg",
+  "Filament for 3D printer.jpg",
+  "Filament Storage Box.jpg",
+  "popscicle sticks.jpg",
+  "rubberband.jpg",
+  "string.jpg",
+  "Thermacol.jpg",
+  "UPS_Power back.jpg",
+  "wood glue.jpg",
+];
+
+const MECHANICAL_TOOLS_FILES: string[] = [
+  "Adapters 12V.jpg",
+  "Adapters 5V.jpg",
+  "Adjustable Wrench Spanner.jpg",
+  "Air blower 500W.jpg",
+  "Allen Key Set.jpg",
+  "Ball Pein Hammer.jpg",
+  "C-Clamp.jpg",
+  "Cordless rotary Tool Set.jpg",
+  "Digital Multi Meter.jpg",
+  "Digital Oscilloscope.jpg",
+  "Digital Pen electric Tester.jpg",
+  "Digital Vernier Caliper.jpg",
+  "Drill Bit Set.jpg",
+  "Drill machine set (Wired).jpg",
+  "Dual Temperature Heat Gun.jpg",
+  "Electric Screw Driver Set.jpg",
+  "Extra hacksaw blades.jpg",
+  "File set.jpg",
+  "Flexible Cutting Mat.jpg",
+  "Hacksaw blades Mini.jpg",
+  "Hacksaw.jpg",
+  "Hot glue gun.jpg",
+  "Mini file set.jpg",
+  "Mini Hack Saw (local).jpg",
+  "Multipurpose Screwdriver.jpg",
+  "Paper Microscope.jpg",
+  "PegBoard.jpg",
+  "Plastic Tool Box (Set of 10).jpg",
+  "Pliers.jpg",
+  "Precision Screw Driver Set.jpg",
+  "Return measuring tape.jpg",
+  "Sewing kit.jpg",
+  "Soldering Helping hand.jpg",
+  "Soldering Kit.jpg",
+  "Spanner Set.jpg",
+  "Spirit Level.jpg",
+  "Stainless Steel Rule.jpg",
+  "Steel Shaft Claw Hammer.jpg",
+  "Telescope.jpg",
+  "Tweezer set 6pc..jpg",
+  "Vice Normal.jpg",
+  "Wire Strippers.jpg",
+  "Workstation for drilling.jpg",
+];
+
+// Maps folder name -> list of real files inside it. Add a new entry here
+// whenever a new category image folder is created.
+const IMAGE_FILES_BY_FOLDER: Record<string, string[]> = {
+  "Electronic Components": ELECTRONIC_COMPONENTS_FILES,
+  "3D Printers & Parts": THREE_D_PRINTERS_PARTS_FILES,
+  "Mechanical Tools": MECHANICAL_TOOLS_FILES,
+};
+
 // -----------------------------------------------------------------------------
 // KNOWN IMAGE MAPPINGS
 // Confirmed pairs where the product's Excel/DB name differs from the actual
@@ -329,18 +401,19 @@ function getKnownImageFilename(productName: string): string | null {
   return KNOWN_IMAGE_MAPPINGS[normalizeProductName(productName)] || null;
 }
 
-function getFallbackImageFilename(productName: string): string | null {
+function getFallbackImageFilename(productName: string, folder: string): string | null {
+  const fileList = IMAGE_FILES_BY_FOLDER[folder] || [];
   const normalizedProduct = normalizeFileName(productName);
-  if (!normalizedProduct) return null;
+  if (!normalizedProduct || fileList.length === 0) return null;
 
   // 1. Exact normalized filename match
-  const exactMatch = ACTUAL_IMAGE_FILES.find(
+  const exactMatch = fileList.find(
     (file) => normalizeFileName(file) === normalizedProduct
   );
   if (exactMatch) return exactMatch;
 
   // 2. One contains the other
-  const containsMatch = ACTUAL_IMAGE_FILES.find((file) => {
+  const containsMatch = fileList.find((file) => {
     const normalizedFile = normalizeFileName(file);
     return normalizedFile.includes(normalizedProduct) || normalizedProduct.includes(normalizedFile);
   });
@@ -353,7 +426,7 @@ function getFallbackImageFilename(productName: string): string | null {
   let bestFile: string | null = null;
   let bestScore = 0;
 
-  for (const file of ACTUAL_IMAGE_FILES) {
+  for (const file of fileList) {
     const normalizedFile = normalizeFileName(file);
     let score = 0;
     for (const token of productTokens) {
@@ -388,8 +461,9 @@ function resolveProductImage(
     }
 
     if (/\.(jpg|jpeg|png|webp)$/i.test(trimmed)) {
-      // Verify the file actually exists before trusting it blindly
-      const existsOnDisk = ACTUAL_IMAGE_FILES.some(
+      // Verify the file actually exists in this category's folder before trusting it blindly
+      const fileList = IMAGE_FILES_BY_FOLDER[folder] || [];
+      const existsOnDisk = fileList.some(
         (f) => normalizeFileName(f) === normalizeFileName(trimmed)
       );
       if (existsOnDisk) {
@@ -405,8 +479,8 @@ function resolveProductImage(
     return { path: buildProductImagePath(folder, knownFilename), mapped: true };
   }
 
-  // 3. Fuzzy match against real files on disk
-  const fallbackFilename = getFallbackImageFilename(productName);
+  // 3. Fuzzy match against real files in this category's folder
+  const fallbackFilename = getFallbackImageFilename(productName, folder);
   if (fallbackFilename) {
     return { path: buildProductImagePath(folder, fallbackFilename), mapped: true };
   }
@@ -414,7 +488,7 @@ function resolveProductImage(
   return {
     path: "",
     mapped: false,
-    warning: `No matching image found for "${productName}". Upload a file and add it to ACTUAL_IMAGE_FILES / KNOWN_IMAGE_MAPPINGS.`,
+    warning: `No matching image found for "${productName}" in folder "${folder}". Upload the file and add it to the relevant file list / KNOWN_IMAGE_MAPPINGS.`,
   };
 }
 
