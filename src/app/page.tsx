@@ -1359,6 +1359,8 @@ export default function DashboardPage() {
               onClose={() => setIsImportModalOpen(false)}
               onSuccess={handleImportSuccess}
               token={token}
+              categories={productCategories}
+              existingProducts={products.map((p) => ({ id: p.id, name: p.name, category: p.category }))}
             />
 
             {/* Product Delete Confirmation Modal */}
