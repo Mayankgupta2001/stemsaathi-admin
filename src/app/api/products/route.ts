@@ -1,30 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import jwt from "jsonwebtoken";
-
-const JWT_SECRET = process.env.JWT_SECRET || "stemsaathi-default-admin-jwt-secret-key-2025";
-
-function verifyToken(req: NextRequest): boolean {
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return false;
-  }
-
-  const token = authHeader.split(" ")[1];
-  try {
-    jwt.verify(token, JWT_SECRET);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { verifyAdminToken } from "@/lib/adminAuth";
 
 // -----------------------------------------------------------------------------
 // GET /api/products — list all products (used by the admin Products tab)
 // -----------------------------------------------------------------------------
 
 export async function GET(req: NextRequest) {
-  if (!verifyToken(req)) {
+  if (!verifyAdminToken(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -46,7 +29,7 @@ export async function GET(req: NextRequest) {
 // -----------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
-  if (!verifyToken(req)) {
+  if (!verifyAdminToken(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -116,7 +99,7 @@ export async function POST(req: NextRequest) {
 // -----------------------------------------------------------------------------
 
 export async function PATCH(req: NextRequest) {
-  if (!verifyToken(req)) {
+  if (!verifyAdminToken(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -196,7 +179,7 @@ export async function PATCH(req: NextRequest) {
 // -----------------------------------------------------------------------------
 
 export async function DELETE(req: NextRequest) {
-  if (!verifyToken(req)) {
+  if (!verifyAdminToken(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

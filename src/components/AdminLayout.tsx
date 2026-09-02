@@ -2,7 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 
-type TabValue = "dashboard" | "leads" | "orders" | "products";
+type TabValue = "dashboard" | "leads" | "orders" | "products" | "lms";
 
 const navItems: { value: TabValue; label: string; icon: ReactNode }[] = [
   {
@@ -46,6 +46,18 @@ const navItems: { value: TabValue; label: string; icon: ReactNode }[] = [
       <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5">
         <path d="M10 3l6.5 3.5v7L10 17l-6.5-3.5v-7L10 3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
         <path d="M3.5 6.5L10 10l6.5-3.5M10 10v7" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
+    value: "lms",
+    label: "LMS",
+    icon: (
+      <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5">
+        <path d="M10 3L2 7l8 4 8-4-8-4z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M2 11l8 4 8-4" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+        <path d="M18 7v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        <circle cx="18" cy="13" r="1" fill="currentColor" />
       </svg>
     ),
   },

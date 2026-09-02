@@ -7,6 +7,7 @@ import { clearStoredAdminToken, useAdminAuthGuard } from "@/lib/auth";
 import AdminLayout from "@/components/AdminLayout";
 import ProductImportModal from "@/components/ProductImportModal";
 import ProductDeleteConfirmModal from "@/components/ProductDeleteConfirmModal";
+import AccountsManager from "@/components/AccountsManager";
 import { exportProductsToSpreadsheet } from "@/lib/product-import";
 import { calculatePrices } from "@/lib/pricing";
 
@@ -81,6 +82,98 @@ type ProductFormState = {
   badge: string;
 };
 
+type LmsLesson = {
+  id: string;
+  title: string;
+  order: number;
+  content?: string | null;
+  videoUrl?: string | null;
+  moduleId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type LmsModule = {
+  id: string;
+  title: string;
+  order: number;
+  courseId: string;
+  createdAt: string;
+  updatedAt: string;
+  lessons: LmsLesson[];
+};
+
+type LmsCourse = {
+  id: string;
+  title: string;
+  description: string;
+  thumbnail?: string | null;
+  price: number;
+  isPublished: boolean;
+  createdAt: string;
+  updatedAt: string;
+  modules: LmsModule[];
+};
+
+type LmsStudent = {
+  id: string;
+  name: string;
+  email: string;
+  phone?: string | null;
+  isVerified: boolean;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    enrollments: number;
+    progress: number;
+    payments: number;
+  };
+};
+
+type LmsCourseFormState = {
+  title: string;
+  description: string;
+  thumbnail: string;
+  price: string;
+  isPublished: boolean;
+};
+
+type LmsModuleFormState = {
+  title: string;
+  order: string;
+  courseId: string;
+};
+
+type LmsLessonFormState = {
+  title: string;
+  order: string;
+  content: string;
+  videoUrl: string;
+  moduleId: string;
+};
+
+const createEmptyLmsCourseForm = (): LmsCourseFormState => ({
+  title: "",
+  description: "",
+  thumbnail: "",
+  price: "0",
+  isPublished: false,
+});
+
+const createEmptyLmsModuleForm = (courseId = ""): LmsModuleFormState => ({
+  title: "",
+  order: "0",
+  courseId,
+});
+
+const createEmptyLmsLessonForm = (moduleId = ""): LmsLessonFormState => ({
+  title: "",
+  order: "0",
+  content: "",
+  videoUrl: "",
+  moduleId,
+});
+
 const statusStyles: Record<string, { badge: string; dot: string }> = {
   new: { badge: "bg-amber-50 text-amber-700 ring-1 ring-amber-200", dot: "bg-amber-500" },
   contacted: { badge: "bg-sky-50 text-sky-700 ring-1 ring-sky-200", dot: "bg-sky-500" },
@@ -124,6 +217,101 @@ const formatCurrency = (value: number) =>
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(value);
+
+const collapseRepeatedText = (value: string) => {
+  const text = value.trim();
+  if (!text) return "";
+
+  for (let size = 1; size <= Math.floor(text.length / 2); size++) {
+    if (text.length % size !== 0) continue;
+    const chunk = text.slice(0, size);
+    if (chunk.repeat(text.length / size) === text) {
+      return chunk;
+    }
+  }
+
+  return text;
+};
+
+const normalizeUrl = (value?: string | null) => {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    return null;
+  }
+};
+
+type VideoPreviewData = {
+  provider: "youtube" | "vimeo";
+  id: string;
+  thumbnail: string;
+  embedUrl: string;
+};
+
+const extractYouTubeId = (value: string) => {
+  try {
+    const url = new URL(value);
+    if (url.hostname.includes("youtu.be")) {
+      return url.pathname.split("/").filter(Boolean)[0] || null;
+    }
+
+    if (url.hostname.includes("youtube.com")) {
+      const watchId = url.searchParams.get("v");
+      if (watchId) return watchId;
+
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      const embedIndex = pathParts.findIndex((part) => part === "embed" || part === "shorts");
+      if (embedIndex >= 0 && pathParts[embedIndex + 1]) {
+        return pathParts[embedIndex + 1];
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
+const extractVimeoId = (value: string) => {
+  try {
+    const url = new URL(value);
+    const match = url.pathname.match(/\/(?:video\/)?(\d+)/);
+    return match?.[1] || null;
+  } catch {
+    return null;
+  }
+};
+
+const getVideoPreviewData = (value?: string | null): VideoPreviewData | null => {
+  const normalized = normalizeUrl(value);
+  if (!normalized) return null;
+
+  const youtubeId = extractYouTubeId(normalized);
+  if (youtubeId) {
+    return {
+      provider: "youtube",
+      id: youtubeId,
+      thumbnail: `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`,
+      embedUrl: `https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1`,
+    };
+  }
+
+  const vimeoId = extractVimeoId(normalized);
+  if (vimeoId) {
+    return {
+      provider: "vimeo",
+      id: vimeoId,
+      thumbnail: `https://vumbnail.com/${vimeoId}.jpg`,
+      embedUrl: `https://player.vimeo.com/video/${vimeoId}`,
+    };
+  }
+
+  return null;
+};
 
 const initials = (name: string) => {
   if (!name) return "?";
@@ -174,21 +362,30 @@ function StatCard({
   value,
   accent,
   icon,
+  trend,
 }: {
   label: string;
   value: number;
   accent: string;
   icon: ReactNode;
+  trend?: string;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md">
-      <div className={`absolute -right-4 -top-4 h-20 w-20 rounded-full ${accent} opacity-[0.08]`} />
-      <div className="flex items-start justify-between">
-        <div>
+    <div className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg">
+      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${accent}`} />
+      <div className={`absolute -right-4 -top-4 h-24 w-24 rounded-full ${accent} opacity-[0.08]`} />
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0">
           <p className="text-sm font-medium text-slate-500">{label}</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{value}</p>
+          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{value}</p>
+          {trend ? (
+            <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
+              <span className="text-emerald-500">↗</span>
+              {trend}
+            </div>
+          ) : null}
         </div>
-        <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${accent} text-white shadow-sm`}>
+        <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ${accent} text-white shadow-sm ring-1 ring-black/5`}>
           {icon}
         </div>
       </div>
@@ -240,7 +437,7 @@ export default function DashboardPage() {
     redirectPath: "/login",
   });
 
-  const [activeTab, setActiveTab] = useState<"dashboard" | "leads" | "orders" | "products">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "leads" | "orders" | "products" | "lms">("dashboard");
   const [leads, setLeads] = useState<Lead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
@@ -274,6 +471,40 @@ export default function DashboardPage() {
   const [productSubmitting, setProductSubmitting] = useState(false);
   const [pendingProductToggleId, setPendingProductToggleId] = useState<string | null>(null);
   const [imageUploading, setImageUploading] = useState(false);
+
+  const [lmsView, setLmsView] = useState<"courses" | "students" | "accounts">("courses");
+  const [lmsCourses, setLmsCourses] = useState<LmsCourse[]>([]);
+  const [lmsStudents, setLmsStudents] = useState<LmsStudent[]>([]);
+  const [lmsCoursesLoading, setLmsCoursesLoading] = useState(false);
+  const [lmsStudentsLoading, setLmsStudentsLoading] = useState(false);
+  const [lmsCoursesError, setLmsCoursesError] = useState("");
+  const [lmsStudentsError, setLmsStudentsError] = useState("");
+  const [lmsCoursesLoaded, setLmsCoursesLoaded] = useState(false);
+  const [lmsStudentsLoaded, setLmsStudentsLoaded] = useState(false);
+  const [selectedLmsCourseId, setSelectedLmsCourseId] = useState<string | null>(null);
+  const [selectedLmsModuleId, setSelectedLmsModuleId] = useState<string | null>(null);
+  const [expandedLmsModuleIds, setExpandedLmsModuleIds] = useState<Record<string, boolean>>({});
+  const [isLmsCourseModalOpen, setIsLmsCourseModalOpen] = useState(false);
+  const [isLmsModuleModalOpen, setIsLmsModuleModalOpen] = useState(false);
+  const [isLmsLessonModalOpen, setIsLmsLessonModalOpen] = useState(false);
+  const [lmsCourseMode, setLmsCourseMode] = useState<"create" | "edit">("create");
+  const [lmsModuleMode, setLmsModuleMode] = useState<"create" | "edit">("create");
+  const [lmsLessonMode, setLmsLessonMode] = useState<"create" | "edit">("create");
+  const [editingLmsCourseId, setEditingLmsCourseId] = useState<string | null>(null);
+  const [editingLmsModuleId, setEditingLmsModuleId] = useState<string | null>(null);
+  const [editingLmsLessonId, setEditingLmsLessonId] = useState<string | null>(null);
+  const [lmsCourseForm, setLmsCourseForm] = useState<LmsCourseFormState>(createEmptyLmsCourseForm);
+  const [lmsModuleForm, setLmsModuleForm] = useState<LmsModuleFormState>(createEmptyLmsModuleForm);
+  const [lmsLessonForm, setLmsLessonForm] = useState<LmsLessonFormState>(createEmptyLmsLessonForm);
+  const [lmsSubmitting, setLmsSubmitting] = useState(false);
+  const [lmsDeletingId, setLmsDeletingId] = useState<string | null>(null);
+  const [videoPreviewLesson, setVideoPreviewLesson] = useState<LmsLesson | null>(null);
+  const [lmsLessonResources, setLmsLessonResources] = useState<Array<{id: string; title: string; fileUrl: string; type: string}>>([]);
+  const [newResourceTitle, setNewResourceTitle] = useState("");
+  const [newResourceUrl, setNewResourceUrl] = useState("");
+  const [newResourceType, setNewResourceType] = useState("pdf");
+  const [addingResource, setAddingResource] = useState(false);
+  const [deletingResourceId, setDeletingResourceId] = useState<string | null>(null);
 
   // Bulk operations & modal states
   const [selectedProductIds, setSelectedProductIds] = useState<string[]>([]);
@@ -370,6 +601,80 @@ export default function DashboardPage() {
     fetchProducts();
   }, [activeTab, isReady, productsLoaded, router, token]);
 
+  useEffect(() => {
+    if (!isReady || !token || !activeTab || activeTab !== "lms" || lmsCoursesLoaded) return;
+
+    const fetchCourses = async () => {
+      setLmsCoursesLoading(true);
+      setLmsCoursesError("");
+      try {
+        const response = await authenticatedFetch<{ courses: LmsCourse[] }>("/api/lms/courses", { token });
+        if (!response.ok) {
+          if (response.status === 401) {
+            clearStoredAdminToken();
+            router.replace("/login");
+            return;
+          }
+          setLmsCoursesError(response.error || "Unable to load courses at the moment.");
+          return;
+        }
+
+        const nextCourses = response.data?.courses ?? [];
+        setLmsCourses(nextCourses);
+        setLmsCoursesLoaded(true);
+
+        if (!selectedLmsCourseId && nextCourses.length > 0) {
+          const firstCourse = nextCourses[0];
+          const firstModuleId = firstCourse.modules?.[0]?.id ?? null;
+          setSelectedLmsCourseId(firstCourse.id);
+          setSelectedLmsModuleId(firstModuleId);
+          if (firstModuleId) {
+            setExpandedLmsModuleIds((current) => ({
+              ...current,
+              [firstModuleId]: true,
+            }));
+          }
+        }
+      } catch {
+        setLmsCoursesError("Network error while loading courses.");
+      } finally {
+        setLmsCoursesLoading(false);
+      }
+    };
+
+    fetchCourses();
+  }, [activeTab, isReady, lmsCoursesLoaded, router, selectedLmsCourseId, token]);
+
+  useEffect(() => {
+    if (!isReady || !token || lmsStudentsLoaded || (activeTab !== "lms" && activeTab !== "dashboard")) return;
+
+    const fetchStudents = async () => {
+      setLmsStudentsLoading(true);
+      setLmsStudentsError("");
+      try {
+        const response = await authenticatedFetch<{ students: LmsStudent[] }>("/api/lms/students", { token });
+        if (!response.ok) {
+          if (response.status === 401) {
+            clearStoredAdminToken();
+            router.replace("/login");
+            return;
+          }
+          setLmsStudentsError(response.error || "Unable to load students at the moment.");
+          return;
+        }
+
+        setLmsStudents(response.data?.students ?? []);
+        setLmsStudentsLoaded(true);
+      } catch {
+        setLmsStudentsError("Network error while loading students.");
+      } finally {
+        setLmsStudentsLoading(false);
+      }
+    };
+
+    fetchStudents();
+  }, [activeTab, isReady, lmsStudentsLoaded, router, token]);
+
   const filteredLeads = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
     return [...leads]
@@ -418,9 +723,9 @@ export default function DashboardPage() {
     return { total, pendingVerification, verified, delivered };
   }, [orders]);
 
-  const totalRevenue = useMemo(() => {
-    return orders.reduce((sum, order) => sum + (order.totalAmount || 0), 0);
-  }, [orders]);
+  const totalStudents = useMemo(() => {
+    return lmsStudents.length;
+  }, [lmsStudents.length]);
 
   const leadsBySource = useMemo(() => {
     const counts: Record<string, number> = { contact: 0, "book-demo": 0, "welcome-modal": 0 };
@@ -752,6 +1057,451 @@ export default function DashboardPage() {
     }, 4000);
   };
 
+  const selectedLmsCourse = lmsCourses.find((course) => course.id === selectedLmsCourseId) || null;
+  const selectedLmsModule =
+    selectedLmsCourse?.modules.find((module) => module.id === selectedLmsModuleId) ||
+    selectedLmsCourse?.modules[0] ||
+    null;
+
+  const selectLmsCourse = (course: LmsCourse) => {
+    setSelectedLmsCourseId(course.id);
+    const firstModuleId = course.modules?.[0]?.id ?? null;
+    setSelectedLmsModuleId(firstModuleId);
+    if (firstModuleId) {
+      setExpandedLmsModuleIds((current) => ({
+        ...current,
+        [firstModuleId]: true,
+      }));
+    }
+  };
+
+  const toggleLmsModuleExpanded = (moduleId: string) => {
+    setExpandedLmsModuleIds((current) => ({
+      ...current,
+      [moduleId]: !current[moduleId],
+    }));
+  };
+
+  const openLmsVideoPreview = (lesson: LmsLesson) => {
+    if (!getVideoPreviewData(lesson.videoUrl)) return;
+    setVideoPreviewLesson(lesson);
+  };
+
+  const closeLmsVideoPreview = () => {
+    setVideoPreviewLesson(null);
+  };
+
+  const openCreateLmsCourseModal = () => {
+    setLmsCourseMode("create");
+    setEditingLmsCourseId(null);
+    setLmsCourseForm(createEmptyLmsCourseForm());
+    setIsLmsCourseModalOpen(true);
+  };
+
+  const openEditLmsCourseModal = (course: LmsCourse) => {
+    setLmsCourseMode("edit");
+    setEditingLmsCourseId(course.id);
+    setLmsCourseForm({
+      title: course.title,
+      description: course.description,
+      thumbnail: course.thumbnail || "",
+      price: String(course.price),
+      isPublished: course.isPublished,
+    });
+    setIsLmsCourseModalOpen(true);
+  };
+
+  const handleLmsCourseSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (lmsSubmitting) return;
+    setLmsSubmitting(true);
+    setLmsCoursesError("");
+
+    try {
+      const courseUrl =
+        lmsCourseMode === "create"
+          ? "/api/lms/courses"
+          : `/api/lms/courses/${editingLmsCourseId}`;
+
+      const response = await authenticatedFetch<{ course: LmsCourse }>(courseUrl, {
+        method: lmsCourseMode === "create" ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          lmsCourseMode === "create"
+            ? {
+                title: lmsCourseForm.title.trim(),
+                description: collapseRepeatedText(lmsCourseForm.description),
+                thumbnail: lmsCourseForm.thumbnail.trim() || null,
+                price: Number(lmsCourseForm.price || 0),
+                isPublished: lmsCourseForm.isPublished,
+              }
+            : {
+                id: editingLmsCourseId,
+                title: lmsCourseForm.title.trim(),
+                description: collapseRepeatedText(lmsCourseForm.description),
+                thumbnail: lmsCourseForm.thumbnail.trim() || null,
+                price: Number(lmsCourseForm.price || 0),
+                isPublished: lmsCourseForm.isPublished,
+              }
+        ),
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        setLmsCoursesError(response.error || "Unable to save the course.");
+        return;
+      }
+
+      setIsLmsCourseModalOpen(false);
+      setEditingLmsCourseId(null);
+      setLmsCourseForm(createEmptyLmsCourseForm());
+      setLmsCoursesLoaded(false);
+      showToast(lmsCourseMode === "create" ? "Course created." : "Course updated.");
+    } catch {
+      setLmsCoursesError("Network error while saving the course.");
+    } finally {
+      setLmsSubmitting(false);
+    }
+  };
+
+  const handleDeleteLmsCourse = async (course: LmsCourse) => {
+    if (!window.confirm(`Delete course "${course.title}"? This will remove its modules and lessons too.`)) {
+      return;
+    }
+
+    setLmsDeletingId(course.id);
+    try {
+      const response = await authenticatedFetch<{ success: boolean }>(`/api/lms/courses/${course.id}`, {
+        method: "DELETE",
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        console.error("Failed to delete LMS course:", response.error, response.data);
+        setLmsCoursesError(response.error || "Unable to delete the course.");
+        showToast(response.error || "Failed to delete course.");
+        return;
+      }
+
+      if (selectedLmsCourseId === course.id) {
+        setSelectedLmsCourseId(null);
+        setSelectedLmsModuleId(null);
+      }
+      setLmsCoursesLoaded(false);
+      showToast("Course deleted.");
+    } catch {
+      console.error("Network error while deleting LMS course.");
+      setLmsCoursesError("Network error while deleting the course.");
+      showToast("Network error while deleting course.");
+    } finally {
+      setLmsDeletingId(null);
+    }
+  };
+
+  const openCreateLmsModuleModal = () => {
+    setLmsModuleMode("create");
+    setEditingLmsModuleId(null);
+    setLmsModuleForm(createEmptyLmsModuleForm(selectedLmsCourse?.id || ""));
+    setIsLmsModuleModalOpen(true);
+  };
+
+  const openEditLmsModuleModal = (module: LmsModule) => {
+    setLmsModuleMode("edit");
+    setEditingLmsModuleId(module.id);
+    setLmsModuleForm({
+      title: module.title,
+      order: String(module.order),
+      courseId: module.courseId,
+    });
+    setIsLmsModuleModalOpen(true);
+  };
+
+  const handleLmsModuleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (lmsSubmitting) return;
+    setLmsSubmitting(true);
+    setLmsCoursesError("");
+
+    try {
+      const moduleUrl =
+        lmsModuleMode === "create"
+          ? "/api/lms/modules"
+          : `/api/lms/modules/${editingLmsModuleId}`;
+
+      const response = await authenticatedFetch<{ module: LmsModule }>(moduleUrl, {
+        method: lmsModuleMode === "create" ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          lmsModuleMode === "create"
+            ? {
+                title: lmsModuleForm.title.trim(),
+                courseId: lmsModuleForm.courseId,
+                order: Number(lmsModuleForm.order || 0),
+              }
+            : {
+                id: editingLmsModuleId,
+                title: lmsModuleForm.title.trim(),
+                courseId: lmsModuleForm.courseId,
+                order: Number(lmsModuleForm.order || 0),
+              }
+        ),
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        setLmsCoursesError(response.error || "Unable to save the module.");
+        return;
+      }
+
+      setIsLmsModuleModalOpen(false);
+      setEditingLmsModuleId(null);
+      setLmsModuleForm(createEmptyLmsModuleForm(selectedLmsCourse?.id || ""));
+      setLmsCoursesLoaded(false);
+      showToast(lmsModuleMode === "create" ? "Module created." : "Module updated.");
+    } catch {
+      setLmsCoursesError("Network error while saving the module.");
+    } finally {
+      setLmsSubmitting(false);
+    }
+  };
+
+  const handleDeleteLmsModule = async (module: LmsModule) => {
+    if (!window.confirm(`Delete module "${module.title}"? This will remove its lessons too.`)) {
+      return;
+    }
+
+    setLmsDeletingId(module.id);
+    try {
+      const response = await authenticatedFetch<{ success: boolean }>(`/api/lms/modules/${module.id}`, {
+        method: "DELETE",
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        setLmsCoursesError(response.error || "Unable to delete the module.");
+        showToast(response.error || "Failed to delete module.");
+        return;
+      }
+
+      setLmsCoursesLoaded(false);
+      showToast("Module deleted.");
+    } catch {
+      setLmsCoursesError("Network error while deleting the module.");
+      showToast("Network error while deleting module.");
+    } finally {
+      setLmsDeletingId(null);
+    }
+  };
+
+  const openCreateLmsLessonModal = (moduleId?: string) => {
+    setLmsLessonMode("create");
+    setEditingLmsLessonId(null);
+    setLmsLessonForm(createEmptyLmsLessonForm(moduleId || selectedLmsModule?.id || ""));
+    setLmsLessonResources([]);
+    setNewResourceTitle("");
+    setNewResourceUrl("");
+    setNewResourceType("pdf");
+    setIsLmsLessonModalOpen(true);
+  };
+
+  const openEditLmsLessonModal = async (lesson: LmsLesson) => {
+    setLmsLessonMode("edit");
+    setEditingLmsLessonId(lesson.id);
+    setLmsLessonForm({
+      title: lesson.title,
+      order: String(lesson.order),
+      content: lesson.content || "",
+      videoUrl: lesson.videoUrl || "",
+      moduleId: lesson.moduleId,
+    });
+    setNewResourceTitle("");
+    setNewResourceUrl("");
+    setNewResourceType("pdf");
+
+    // Fetch resources for this lesson
+    try {
+      const response = await authenticatedFetch<{resources: Array<{id: string; title: string; fileUrl: string; type: string}>}>(
+        `/api/lms/lessons/${lesson.id}/resources`,
+        { token }
+      );
+      if (response.ok && response.data?.resources) {
+        setLmsLessonResources(response.data.resources);
+      }
+    } catch (err) {
+      setLmsLessonResources([]);
+    }
+
+    setIsLmsLessonModalOpen(true);
+  };
+
+  const handleLmsLessonSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (lmsSubmitting) return;
+    setLmsSubmitting(true);
+    setLmsCoursesError("");
+
+    try {
+      const lessonUrl =
+        lmsLessonMode === "create"
+          ? "/api/lms/lessons"
+          : `/api/lms/lessons/${editingLmsLessonId}`;
+
+      const response = await authenticatedFetch<{ lesson: LmsLesson }>(lessonUrl, {
+        method: lmsLessonMode === "create" ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          lmsLessonMode === "create"
+            ? {
+                title: lmsLessonForm.title.trim(),
+                moduleId: lmsLessonForm.moduleId,
+                order: Number(lmsLessonForm.order || 0),
+                content: lmsLessonForm.content.trim() || null,
+                videoUrl: lmsLessonForm.videoUrl.trim() || null,
+              }
+            : {
+                id: editingLmsLessonId,
+                title: lmsLessonForm.title.trim(),
+                moduleId: lmsLessonForm.moduleId,
+                order: Number(lmsLessonForm.order || 0),
+                content: lmsLessonForm.content.trim() || null,
+                videoUrl: lmsLessonForm.videoUrl.trim() || null,
+              }
+        ),
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        setLmsCoursesError(response.error || "Unable to save the lesson.");
+        return;
+      }
+
+      setIsLmsLessonModalOpen(false);
+      setEditingLmsLessonId(null);
+      setLmsLessonForm(createEmptyLmsLessonForm(selectedLmsModule?.id || ""));
+      setLmsCoursesLoaded(false);
+      showToast(lmsLessonMode === "create" ? "Lesson created." : "Lesson updated.");
+    } catch {
+      setLmsCoursesError("Network error while saving the lesson.");
+    } finally {
+      setLmsSubmitting(false);
+    }
+  };
+
+  const handleDeleteLmsLesson = async (lesson: LmsLesson) => {
+    if (!window.confirm(`Delete lesson "${lesson.title}"?`)) {
+      return;
+    }
+
+    setLmsDeletingId(lesson.id);
+    try {
+      const response = await authenticatedFetch<{ success: boolean }>(`/api/lms/lessons/${lesson.id}`, {
+        method: "DELETE",
+        token,
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          clearStoredAdminToken();
+          router.replace("/login");
+          return;
+        }
+        setLmsCoursesError(response.error || "Unable to delete the lesson.");
+        showToast(response.error || "Failed to delete lesson.");
+        return;
+      }
+
+      setLmsCoursesLoaded(false);
+      showToast("Lesson deleted.");
+    } catch {
+      setLmsCoursesError("Network error while deleting the lesson.");
+      showToast("Network error while deleting lesson.");
+    } finally {
+      setLmsDeletingId(null);
+    }
+  };
+
+  const handleAddLessonResource = async () => {
+    if (!editingLmsLessonId || !newResourceTitle || !newResourceUrl) {
+      setLmsCoursesError("Please fill in all resource fields.");
+      return;
+    }
+
+    setAddingResource(true);
+    try {
+      const response = await authenticatedFetch<{resource: {id: string; title: string; fileUrl: string; type: string}}>(`/api/lms/lessons/${editingLmsLessonId}/resources`, {
+        method: "POST",
+        token,
+        body: JSON.stringify({
+          title: newResourceTitle.trim(),
+          fileUrl: newResourceUrl.trim(),
+          type: newResourceType,
+        }),
+      });
+
+      if (response.ok && response.data?.resource) {
+        setLmsLessonResources((prev) => [response.data!.resource, ...prev]);
+        setNewResourceTitle("");
+        setNewResourceUrl("");
+        setNewResourceType("pdf");
+        showToast("Resource added.");
+      } else {
+        setLmsCoursesError(response.error || "Failed to add resource.");
+      }
+    } catch {
+      setLmsCoursesError("Network error while adding resource.");
+    } finally {
+      setAddingResource(false);
+    }
+  };
+
+  const handleDeleteLessonResource = async (resourceId: string) => {
+    if (!editingLmsLessonId) return;
+
+    setDeletingResourceId(resourceId);
+    try {
+      const response = await authenticatedFetch<{ success: boolean }>(`/api/lms/lessons/${editingLmsLessonId}/resources/${resourceId}`, {
+        method: "DELETE",
+        token,
+      });
+
+      if (response.ok) {
+        setLmsLessonResources((prev) => prev.filter((r) => r.id !== resourceId));
+        showToast("Resource deleted.");
+      } else {
+        setLmsCoursesError(response.error || "Failed to delete resource.");
+      }
+    } catch {
+      setLmsCoursesError("Network error while deleting resource.");
+    } finally {
+      setDeletingResourceId(null);
+    }
+  };
+
   const handleToggleSelectProduct = (id: string) => {
     setSelectedProductIds((current) =>
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
@@ -873,7 +1623,7 @@ export default function DashboardPage() {
             <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <StatCard label="Total Leads" value={stats.total} accent="bg-brand-blue" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 10.5a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.6" /><path d="M4 16.5c0-2.76 2.69-5 6-5s6 2.24 6 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
               <StatCard label="Total Orders" value={orderStats.total} accent="bg-brand-teal" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 4.5h12l-1 7H5l-1-7z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>} />
-              <StatCard label="Total Revenue" value={totalRevenue} accent="bg-brand-amber" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /><path d="M10 6.5v7M7.5 8.5h4a1.5 1.5 0 010 3h-4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>} />
+              <StatCard label="Total Students" value={totalStudents} accent="bg-brand-amber" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 3.5L2.5 7l7.5 3.5L17.5 7 10 3.5z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><path d="M4.5 8.8V12c0 1.9 2.5 3.5 5.5 3.5s5.5-1.6 5.5-3.5V8.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
               <StatCard label="Total Products" value={productStats.total} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 3l6.5 3.5v7L10 17l-6.5-3.5v-7L10 3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>} />
             </section>
 
@@ -952,13 +1702,6 @@ export default function DashboardPage() {
           </>
         ) : activeTab === "leads" ? (
           <>
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Total Leads" value={stats.total} accent="bg-brand-blue" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 10.5a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" strokeWidth="1.6" /><path d="M4 16.5c0-2.76 2.69-5 6-5s6 2.24 6 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
-              <StatCard label="New" value={stats.newCount} accent="bg-amber-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /><path d="M10 6.5V10.5L12.5 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
-              <StatCard label="Contacted" value={stats.contactedCount} accent="bg-sky-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M3.5 5.5A1.5 1.5 0 015 4h10a1.5 1.5 0 011.5 1.5v6A1.5 1.5 0 0115 13H8l-3.5 3V13H5a1.5 1.5 0 01-1.5-1.5v-6z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /></svg>} />
-              <StatCard label="Converted" value={stats.convertedCount} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 10.5L8 14.5L16 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
-            </section>
-
             <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
               <div className="grid gap-3 lg:grid-cols-3">
                 <div>
@@ -1067,14 +1810,6 @@ export default function DashboardPage() {
           </>
         ) : activeTab === "products" ? (
           <>
-            {/* Stats Cards */}
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Total Products" value={productStats.total} accent="bg-brand-blue" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4.5 5.5A1.5 1.5 0 016 4h8a1.5 1.5 0 011.5 1.5v2A1.5 1.5 0 0114 9H6A1.5 1.5 0 014.5 7.5v-2z" stroke="currentColor" strokeWidth="1.6" /><path d="M4.5 10.5A1.5 1.5 0 016 9h8a1.5 1.5 0 011.5 1.5v2A1.5 1.5 0 0114 14H6a1.5 1.5 0 01-1.5-1.5v-2z" stroke="currentColor" strokeWidth="1.6" /></svg>} />
-              <StatCard label="Active" value={productStats.active} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 10.5L8 14.5L16 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
-              <StatCard label="Inactive" value={productStats.inactive} accent="bg-slate-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M13.5 6.5L6.5 13.5M6.5 6.5L13.5 13.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
-              <StatCard label="Low Stock" value={productStats.lowStock} accent="bg-amber-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 3.5v7l4 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /></svg>} />
-            </section>
-
             {/* Filter & Actions Bar */}
             <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -1521,15 +2256,625 @@ export default function DashboardPage() {
               </div>
             ) : null}
           </>
-        ) : (
+        ) : activeTab === "lms" ? (
           <>
-            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard label="Total Orders" value={orderStats.total} accent="bg-brand-blue" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 4.5h12l-1 7H5l-1-7z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><path d="M7 13.5h1.5M12 13.5h1.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>} />
-              <StatCard label="Pending Verification" value={orderStats.pendingVerification} accent="bg-amber-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M10 3.5v7l4 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /><circle cx="10" cy="10" r="7" stroke="currentColor" strokeWidth="1.6" /></svg>} />
-              <StatCard label="Verified" value={orderStats.verified} accent="bg-emerald-500" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 10.5L8 14.5L16 5.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>} />
-              <StatCard label="Delivered" value={orderStats.delivered} accent="bg-brand-teal" icon={<svg viewBox="0 0 20 20" fill="none" className="h-5 w-5"><path d="M4 6.5h10l2 3v4H4v-7z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" /><circle cx="7.5" cy="13.5" r="1.2" fill="currentColor" /><circle cx="13.5" cy="13.5" r="1.2" fill="currentColor" /></svg>} />
+            <section className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLmsView("courses")}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    lmsView === "courses"
+                      ? "bg-brand-blue text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Courses
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLmsView("students")}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    lmsView === "students"
+                      ? "bg-brand-blue text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Students
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLmsView("accounts")}
+                  className={`rounded-xl px-4 py-2 text-sm font-semibold transition ${
+                    lmsView === "accounts"
+                      ? "bg-brand-blue text-white shadow-sm"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  Accounts
+                </button>
+              </div>
+
+              {lmsView === "courses" ? (
+                <button
+                  type="button"
+                  onClick={openCreateLmsCourseModal}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+                >
+                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                    <path d="M10 4.5v11M4.5 10h11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                  </svg>
+                  Add Course
+                </button>
+              ) : null}
             </section>
 
+            {lmsView === "courses" ? (
+              <>
+                <section className="mt-6">
+                  {lmsCoursesLoading ? (
+                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                      {Array.from({ length: 6 }).map((_, index) => (
+                        <div key={index} className="animate-pulse overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                          <div className="h-44 bg-slate-100" />
+                          <div className="space-y-3 p-5">
+                            <div className="h-5 w-2/3 rounded bg-slate-100" />
+                            <div className="h-4 w-full rounded bg-slate-100" />
+                            <div className="h-4 w-5/6 rounded bg-slate-100" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : lmsCoursesError ? (
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+                      <p className="text-lg font-semibold text-slate-900">Something went wrong</p>
+                      <p className="mt-1 text-sm text-slate-600">{lmsCoursesError}</p>
+                      <button
+                        type="button"
+                        onClick={() => setLmsCoursesLoaded(false)}
+                        className="mt-4 rounded-xl bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : lmsCourses.length === 0 ? (
+                    <div className="p-10 text-center">
+                      <p className="text-lg font-semibold text-slate-900">No courses found</p>
+                      <p className="mt-1 text-sm text-slate-600">Add your first LMS course to start building lessons.</p>
+                      <button
+                        type="button"
+                        onClick={openCreateLmsCourseModal}
+                        className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-brand-blue px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+                      >
+                        Add Course
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                      {lmsCourses.map((course) => {
+                        const isSelected = selectedLmsCourseId === course.id;
+                        const moduleCount = course.modules?.length || 0;
+                        const lessonCount = course.modules.reduce((sum, module) => sum + (module.lessons?.length || 0), 0);
+                        const preview = course.thumbnail ? normalizeUrl(course.thumbnail) : null;
+
+                        return (
+                          <article
+                            key={course.id}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => selectLmsCourse(course)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                selectLmsCourse(course);
+                              }
+                            }}
+                            className={`group relative overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:-translate-y-1 hover:shadow-xl ${
+                              isSelected ? "border-brand-blue ring-2 ring-brand-blue/15" : "border-slate-200"
+                            }`}
+                          >
+                            <div className="relative aspect-[16/10] overflow-hidden bg-slate-100">
+                              {preview ? (
+                                <img
+                                  src={preview}
+                                  alt={course.title}
+                                  className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-end bg-gradient-to-br from-brand-blue via-brand-teal to-slate-900 p-5 text-white">
+                                  <div className="max-w-[75%]">
+                                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-white/70">LMS Course</p>
+                                    <p className="mt-2 text-xl font-semibold leading-tight">{course.title}</p>
+                                  </div>
+                                </div>
+                              )}
+                              <div className="absolute inset-0 bg-gradient-to-t from-slate-950/55 via-slate-950/10 to-transparent" />
+                              <div className="absolute left-4 top-4 flex flex-wrap gap-2">
+                                <span className="rounded-full bg-white/95 px-2.5 py-1 text-[11px] font-semibold text-slate-900 shadow-sm">
+                                  {formatCurrency(course.price)}
+                                </span>
+                                <span
+                                  className={`rounded-full px-2.5 py-1 text-[11px] font-semibold shadow-sm ${
+                                    course.isPublished ? "bg-emerald-500 text-white" : "bg-slate-900/80 text-white"
+                                  }`}
+                                >
+                                  {course.isPublished ? "Published" : "Draft"}
+                                </span>
+                              </div>
+                              <div className="absolute right-4 top-4 flex items-center gap-1.5 opacity-0 transition group-hover:opacity-100">
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openEditLmsCourseModal(course);
+                                  }}
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-slate-700 shadow-sm ring-1 ring-black/5 transition hover:bg-white"
+                                  aria-label={`Edit ${course.title}`}
+                                >
+                                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                                    <path
+                                      d="M12.8 4.3l2.9 2.9-7.8 7.8H5v-2.9l7.8-7.8z"
+                                      stroke="currentColor"
+                                      strokeWidth="1.6"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handleDeleteLmsCourse(course);
+                                  }}
+                                  disabled={lmsDeletingId === course.id}
+                                  className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-rose-600 shadow-sm ring-1 ring-black/5 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                                  aria-label={`Delete ${course.title}`}
+                                >
+                                  <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                                    <path d="M4.5 5.5h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                    <path d="M7 5.5v-1.2c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3v1.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                    <path d="M6.5 8.5v6.2c0 .9.7 1.6 1.6 1.6h3.8c.9 0 1.6-.7 1.6-1.6V8.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                    <path d="M8.5 8.5v5M11.5 8.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+                            <div className="p-5">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <h3 className="truncate text-base font-semibold text-slate-900">{course.title}</h3>
+                                  <p className="mt-1 line-clamp-2 text-sm text-slate-600">{collapseRepeatedText(course.description)}</p>
+                                </div>
+                              </div>
+
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                <span className="inline-flex rounded-full bg-brand-blue/10 px-2.5 py-1 text-[11px] font-semibold text-brand-blue ring-1 ring-brand-blue/15">
+                                  {moduleCount} modules
+                                </span>
+                                <span className="inline-flex rounded-full bg-brand-teal/10 px-2.5 py-1 text-[11px] font-semibold text-brand-teal ring-1 ring-brand-teal/15">
+                                  {lessonCount} lessons
+                                </span>
+                              </div>
+
+                              <div className="mt-5 flex items-center justify-between text-xs text-slate-500">
+                                <span>{course.thumbnail ? "Custom thumbnail" : "Gradient placeholder"}</span>
+                                <span className="font-semibold text-slate-700">{isSelected ? "Selected" : "Open course"}</span>
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                {selectedLmsCourse ? (
+                  <section className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
+                    <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                      <div className="flex flex-col gap-4 border-b border-slate-100 px-5 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Course Outline</p>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <h3 className="text-xl font-semibold tracking-tight text-slate-900">{selectedLmsCourse.title}</h3>
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${selectedLmsCourse.isPublished ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-slate-100 text-slate-700 ring-1 ring-slate-200"}`}>
+                              {selectedLmsCourse.isPublished ? "Published" : "Draft"}
+                            </span>
+                          </div>
+                          <p className="mt-2 max-w-3xl text-sm text-slate-600">{collapseRepeatedText(selectedLmsCourse.description)}</p>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={openCreateLmsModuleModal}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+                          >
+                            <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                              <path d="M10 4.5v11M4.5 10h11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                            </svg>
+                            Add Module
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEditLmsCourseModal(selectedLmsCourse)}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                          >
+                            Edit Course
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 p-5 sm:p-6">
+                        {selectedLmsCourse.modules.length === 0 ? (
+                          <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/70 p-8 text-center">
+                            <p className="text-sm font-semibold text-slate-900">No modules yet</p>
+                            <p className="mt-1 text-sm text-slate-600">Add the first module to start building this course outline.</p>
+                          </div>
+                        ) : (
+                          selectedLmsCourse.modules.map((module) => {
+                            const isExpanded = expandedLmsModuleIds[module.id] ?? selectedLmsModule?.id === module.id;
+                            return (
+                              <div
+                                key={module.id}
+                                className={`overflow-hidden rounded-2xl border bg-white shadow-sm transition ${
+                                  selectedLmsModule?.id === module.id ? "border-brand-blue ring-2 ring-brand-blue/10" : "border-slate-200"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3 px-4 py-4 sm:px-5">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedLmsModuleId(module.id);
+                                      toggleLmsModuleExpanded(module.id);
+                                    }}
+                                    className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                                  >
+                                    <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-400 ring-1 ring-slate-200">
+                                      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
+                                        <path d="M6 5.5h1.5M6 9.5h1.5M6 13.5h1.5M10 5.5h1.5M10 9.5h1.5M10 13.5h1.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                                      </svg>
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className="inline-flex rounded-full bg-brand-blue/10 px-2.5 py-1 text-[11px] font-semibold text-brand-blue ring-1 ring-brand-blue/15">
+                                          Module {module.order}
+                                        </span>
+                                        <h4 className="truncate text-base font-semibold text-slate-900">{module.title}</h4>
+                                      </div>
+                                      <p className="mt-1 text-xs text-slate-500">{module.lessons?.length || 0} lessons</p>
+                                    </div>
+                                  </button>
+
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => openCreateLmsLessonModal(module.id)}
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-brand-blue/10 text-brand-blue transition hover:bg-brand-blue/15"
+                                      aria-label={`Add lesson to ${module.title}`}
+                                    >
+                                      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                                        <path d="M10 4.5v11M4.5 10h11" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditLmsModuleModal(module)}
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200"
+                                      aria-label={`Edit ${module.title}`}
+                                    >
+                                      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                                        <path
+                                          d="M12.8 4.3l2.9 2.9-7.8 7.8H5v-2.9l7.8-7.8z"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinejoin="round"
+                                        />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteLmsModule(module)}
+                                      disabled={lmsDeletingId === module.id}
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                      aria-label={`Delete ${module.title}`}
+                                    >
+                                      <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                                        <path d="M4.5 5.5h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                        <path d="M7 5.5v-1.2c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3v1.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                        <path d="M6.5 8.5v6.2c0 .9.7 1.6 1.6 1.6h3.8c.9 0 1.6-.7 1.6-1.6V8.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                        <path d="M8.5 8.5v5M11.5 8.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedLmsModuleId(module.id);
+                                        toggleLmsModuleExpanded(module.id);
+                                      }}
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200"
+                                      aria-label={isExpanded ? "Collapse module" : "Expand module"}
+                                    >
+                                      <svg
+                                        viewBox="0 0 20 20"
+                                        fill="none"
+                                        className={`h-4 w-4 transition ${isExpanded ? "rotate-180" : ""}`}
+                                      >
+                                        <path d="M5.5 8l4.5 4.5L14.5 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {isExpanded ? (
+                                  <div className="border-t border-slate-100 bg-slate-50/60 p-4 sm:p-5">
+                                    {module.lessons.length === 0 ? (
+                                      <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-5 text-sm text-slate-500">
+                                        No lessons added yet.
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-3">
+                                        {module.lessons.map((lesson) => {
+                                          const videoPreview = getVideoPreviewData(lesson.videoUrl);
+                                          return (
+                                            <article
+                                              key={lesson.id}
+                                              className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:shadow-md"
+                                            >
+                                              <div className="grid gap-0 md:grid-cols-[240px,1fr]">
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openLmsVideoPreview(lesson)}
+                                                  disabled={!videoPreview}
+                                                  className="relative block aspect-video w-full overflow-hidden bg-slate-100 text-left disabled:cursor-default"
+                                                >
+                                                  {videoPreview ? (
+                                                    <>
+                                                      <img
+                                                        src={videoPreview.thumbnail}
+                                                        alt={`${lesson.title} preview`}
+                                                        className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                                                      />
+                                                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/35 via-transparent to-transparent" />
+                                                      <div className="absolute inset-0 flex items-center justify-center">
+                                                        <span className="flex h-14 w-14 items-center justify-center rounded-full bg-white/95 text-brand-blue shadow-lg ring-1 ring-black/5 transition group-hover:scale-105">
+                                                          <svg viewBox="0 0 20 20" fill="currentColor" className="h-5 w-5">
+                                                            <path d="M7.5 5.8v8.4L14.5 10 7.5 5.8z" />
+                                                          </svg>
+                                                        </span>
+                                                      </div>
+                                                    </>
+                                                  ) : (
+                                                    <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
+                                                      <div className="text-center">
+                                                        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-white text-slate-400 shadow-sm ring-1 ring-slate-200">
+                                                          <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5">
+                                                            <path d="M7.5 6.5L13.5 10L7.5 13.5V6.5z" fill="currentColor" />
+                                                          </svg>
+                                                        </div>
+                                                        <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">No preview available</p>
+                                                      </div>
+                                                    </div>
+                                                  )}
+                                                </button>
+
+                                                <div className="p-4 sm:p-5">
+                                                  <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0">
+                                                      <div className="flex flex-wrap items-center gap-2">
+                                                        <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                                                          Lesson {lesson.order}
+                                                        </span>
+                                                        {videoPreview ? (
+                                                          <span className="inline-flex rounded-full bg-brand-blue/10 px-2.5 py-1 text-[11px] font-semibold text-brand-blue ring-1 ring-brand-blue/15">
+                                                            {videoPreview.provider === "youtube" ? "YouTube" : "Vimeo"}
+                                                          </span>
+                                                        ) : null}
+                                                      </div>
+                                                      <h5 className="mt-2 truncate text-base font-semibold text-slate-900">{lesson.title}</h5>
+                                                      <p className="mt-2 line-clamp-2 text-sm text-slate-600">
+                                                        {lesson.content || "No lesson content added yet."}
+                                                      </p>
+                                                    </div>
+
+                                                    <div className="flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => openEditLmsLessonModal(lesson)}
+                                                        className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700 transition hover:bg-slate-200"
+                                                        aria-label={`Edit ${lesson.title}`}
+                                                      >
+                                                        <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                                                          <path
+                                                            d="M12.8 4.3l2.9 2.9-7.8 7.8H5v-2.9l7.8-7.8z"
+                                                            stroke="currentColor"
+                                                            strokeWidth="1.6"
+                                                            strokeLinejoin="round"
+                                                          />
+                                                        </svg>
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteLmsLesson(lesson)}
+                                                        disabled={lmsDeletingId === lesson.id}
+                                                        className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-rose-50 text-rose-600 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                        aria-label={`Delete ${lesson.title}`}
+                                                      >
+                                                        <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+                                                          <path d="M4.5 5.5h11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                                          <path d="M7 5.5v-1.2c0-.7.6-1.3 1.3-1.3h3.4c.7 0 1.3.6 1.3 1.3v1.2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                                          <path d="M6.5 8.5v6.2c0 .9.7 1.6 1.6 1.6h3.8c.9 0 1.6-.7 1.6-1.6V8.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                                          <path d="M8.5 8.5v5M11.5 8.5v5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                                        </svg>
+                                                      </button>
+                                                    </div>
+                                                  </div>
+
+                                                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                                                    <span>{videoPreview ? "Video preview available" : "Text-only lesson"}</span>
+                                                    {videoPreview ? (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => openLmsVideoPreview(lesson)}
+                                                        className="font-semibold text-brand-blue hover:underline"
+                                                      >
+                                                        Preview video
+                                                      </button>
+                                                    ) : null}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </article>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+
+                    <aside className="space-y-4">
+                      <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                        <div className="p-5">
+                          <div className="flex items-start gap-4">
+                            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-brand-blue to-brand-teal text-lg font-bold text-white shadow-sm">
+                              {selectedLmsCourse.thumbnail ? (
+                                <img
+                                  src={normalizeUrl(selectedLmsCourse.thumbnail) || undefined}
+                                  alt={selectedLmsCourse.title}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                initials(selectedLmsCourse.title)
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">At a Glance</p>
+                              <h4 className="mt-1 truncate text-lg font-semibold text-slate-900">{selectedLmsCourse.title}</h4>
+                              <p className="mt-1 text-sm text-slate-600">{formatCurrency(selectedLmsCourse.price)}</p>
+                            </div>
+                          </div>
+
+                          <div className="mt-5 grid grid-cols-2 gap-3">
+                            <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Modules</p>
+                              <p className="mt-1 text-2xl font-bold text-slate-900">{selectedLmsCourse.modules.length}</p>
+                            </div>
+                            <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-200">
+                              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Lessons</p>
+                              <p className="mt-1 text-2xl font-bold text-slate-900">
+                                {selectedLmsCourse.modules.reduce((sum, module) => sum + (module.lessons?.length || 0), 0)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Selected Module</p>
+                            <p className="mt-2 text-sm font-semibold text-slate-900">
+                              {selectedLmsModule ? selectedLmsModule.title : "No module selected"}
+                            </p>
+                            <p className="mt-1 text-sm text-slate-600">
+                              {selectedLmsModule ? `${selectedLmsModule.lessons.length} lessons in this module.` : "Pick a module from the outline to focus editing."}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => openCreateLmsLessonModal(selectedLmsModule?.id)}
+                              disabled={!selectedLmsModule}
+                              className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Add Lesson
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-5 shadow-sm">
+                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Drag & Reorder</p>
+                        <p className="mt-2 text-sm text-slate-600">
+                          Reordering is visual for now. The handles are in place so we can wire drag-and-drop next without changing the layout.
+                        </p>
+                      </div>
+                    </aside>
+                  </section>
+                ) : null}
+                            </>
+            ) : lmsView === "students" ? (
+              <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                {lmsStudentsLoading ? (
+                  <div className="space-y-3 p-6">{Array.from({ length: 5 }).map((_, index) => <div key={index} className="animate-pulse rounded-xl bg-slate-100 px-4 py-4"><div className="h-4 w-1/4 rounded bg-slate-200" /></div>)}</div>
+                ) : lmsStudentsError ? (
+                  <div className="p-10 text-center">
+                    <p className="text-lg font-semibold text-slate-900">Something went wrong</p>
+                    <p className="mt-1 text-sm text-slate-600">{lmsStudentsError}</p>
+                    <button
+                      type="button"
+                      onClick={() => setLmsStudentsLoaded(false)}
+                      className="mt-4 rounded-xl bg-brand-blue px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : lmsStudents.length === 0 ? (
+                  <div className="p-10 text-center">
+                    <p className="text-lg font-semibold text-slate-900">No students found</p>
+                    <p className="mt-1 text-sm text-slate-600">Students will appear here after they sign up.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-100 text-left text-sm">
+                      <thead className="bg-slate-50/80">
+                        <tr>
+                          {["Student", "Email", "Phone", "Enrollments", "Progress", "Status", "Joined"].map((header) => (
+                            <th key={header} className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{header}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 bg-white">
+                        {lmsStudents.map((student) => (
+                          <tr key={student.id} className="hover:bg-slate-50/60">
+                            <td className="px-4 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold ${avatarColor(student.name)}`}>
+                                  {initials(student.name)}
+                                </div>
+                                <div>
+                                  <p className="font-semibold text-slate-900">{student.name}</p>
+                                  <p className="text-xs text-slate-500">Student profile</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-4 text-slate-700">{student.email}</td>
+                            <td className="px-4 py-4 text-slate-700">{student.phone || "—"}</td>
+                            <td className="px-4 py-4">
+                              <span className="inline-flex rounded-full bg-brand-blue/10 px-2.5 py-1 text-xs font-semibold text-brand-blue ring-1 ring-brand-blue/15">
+                                {student._count?.enrollments ?? 0} enrollments
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 text-slate-700">{student._count?.progress ?? 0}</td>
+                            <td className="px-4 py-4">
+                              <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${student.isVerified ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-1 ring-amber-200"}`}>
+                                {student.isVerified ? "Verified" : "Pending"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-4 whitespace-nowrap text-slate-600">{formatDate(student.createdAt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            ) : lmsView === "accounts" ? (
+              <section className="mt-6">
+                {token && <AccountsManager token={token} isLoading={false} />}
+              </section>
+            ) : null}
+          </>
+        ) : (
+          <>
             <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
               <div className="grid gap-3 lg:grid-cols-3">
                 <div>
@@ -1683,6 +3028,263 @@ export default function DashboardPage() {
             </section>
           </>
         )}
+
+        {isLmsCourseModalOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+            <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">{lmsCourseMode === "create" ? "Add Course" : "Edit Course"}</h3>
+                  <p className="mt-1 text-sm text-slate-600">Create the course shell first, then add modules and lessons.</p>
+                </div>
+                <button type="button" onClick={() => setIsLmsCourseModalOpen(false)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Close</button>
+              </div>
+              <form onSubmit={handleLmsCourseSubmit} className="mt-5 space-y-4">
+                <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                  <span>Title</span>
+                  <input required value={lmsCourseForm.title} onChange={(event) => setLmsCourseForm((current) => ({ ...current, title: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                </label>
+                <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                  <span>Description</span>
+                  <textarea required rows={4} value={lmsCourseForm.description} onChange={(event) => setLmsCourseForm((current) => ({ ...current, description: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                    <span>Thumbnail URL</span>
+                    <input value={lmsCourseForm.thumbnail} onChange={(event) => setLmsCourseForm((current) => ({ ...current, thumbnail: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                  </label>
+                  <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                    <span>Price (₹)</span>
+                    <input type="number" min="0" value={lmsCourseForm.price} onChange={(event) => setLmsCourseForm((current) => ({ ...current, price: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                  </label>
+                </div>
+                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <input type="checkbox" checked={lmsCourseForm.isPublished} onChange={(event) => setLmsCourseForm((current) => ({ ...current, isPublished: event.target.checked }))} className="h-4 w-4 rounded border-slate-300 text-brand-blue focus:ring-brand-blue/30" />
+                  Publish course
+                </label>
+                <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+                  <button type="button" onClick={() => setIsLmsCourseModalOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancel</button>
+                  <button type="submit" disabled={lmsSubmitting} className="rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
+                    {lmsSubmitting ? "Saving..." : lmsCourseMode === "create" ? "Create Course" : "Save Changes"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
+
+        {isLmsModuleModalOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+            <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">{lmsModuleMode === "create" ? "Add Module" : "Edit Module"}</h3>
+                  <p className="mt-1 text-sm text-slate-600">Modules belong to one course and contain ordered lessons.</p>
+                </div>
+                <button type="button" onClick={() => setIsLmsModuleModalOpen(false)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Close</button>
+              </div>
+              <form onSubmit={handleLmsModuleSubmit} className="mt-5 space-y-4">
+                <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                  <span>Title</span>
+                  <input required value={lmsModuleForm.title} onChange={(event) => setLmsModuleForm((current) => ({ ...current, title: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                    <span>Course</span>
+                    <select required value={lmsModuleForm.courseId} onChange={(event) => setLmsModuleForm((current) => ({ ...current, courseId: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
+                      <option value="">Select course</option>
+                      {lmsCourses.map((course) => (
+                        <option key={course.id} value={course.id}>{course.title}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                    <span>Order</span>
+                    <input type="number" min="0" value={lmsModuleForm.order} onChange={(event) => setLmsModuleForm((current) => ({ ...current, order: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                  </label>
+                </div>
+                <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+                  <button type="button" onClick={() => setIsLmsModuleModalOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancel</button>
+                  <button type="submit" disabled={lmsSubmitting} className="rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
+                    {lmsSubmitting ? "Saving..." : lmsModuleMode === "create" ? "Create Module" : "Save Changes"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
+
+        {isLmsLessonModalOpen ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 px-4 py-6 backdrop-blur-sm">
+            <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">{lmsLessonMode === "create" ? "Add Lesson" : "Edit Lesson"}</h3>
+                  <p className="mt-1 text-sm text-slate-600">Lessons live inside a module and can include text or video links.</p>
+                </div>
+                <button type="button" onClick={() => setIsLmsLessonModalOpen(false)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Close</button>
+              </div>
+              <form onSubmit={handleLmsLessonSubmit} className="mt-5 space-y-4">
+                <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                  <span>Title</span>
+                  <input required value={lmsLessonForm.title} onChange={(event) => setLmsLessonForm((current) => ({ ...current, title: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                    <span>Module</span>
+                    <select required value={lmsLessonForm.moduleId} onChange={(event) => setLmsLessonForm((current) => ({ ...current, moduleId: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15">
+                      <option value="">Select module</option>
+                      {lmsCourses.flatMap((course) => course.modules).map((module) => (
+                        <option key={module.id} value={module.id}>
+                          {module.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                    <span>Order</span>
+                    <input type="number" min="0" value={lmsLessonForm.order} onChange={(event) => setLmsLessonForm((current) => ({ ...current, order: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                  </label>
+                </div>
+                <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                  <span>Video URL</span>
+                  <input value={lmsLessonForm.videoUrl} onChange={(event) => setLmsLessonForm((current) => ({ ...current, videoUrl: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                </label>
+                <label className="block space-y-1.5 text-sm font-medium text-slate-700">
+                  <span>Content</span>
+                  <textarea rows={5} value={lmsLessonForm.content} onChange={(event) => setLmsLessonForm((current) => ({ ...current, content: event.target.value }))} className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15" />
+                </label>
+
+                {/* Resources Section */}
+                {lmsLessonMode === "edit" && editingLmsLessonId && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <h4 className="mb-3 text-sm font-semibold text-slate-900">Lesson Resources (PDFs, Files)</h4>
+
+                    {/* Existing Resources */}
+                    {lmsLessonResources.length > 0 && (
+                      <div className="mb-4 space-y-2 border-b border-slate-200 pb-4">
+                        {lmsLessonResources.map((resource) => (
+                          <div key={resource.id} className="flex items-center justify-between gap-2 rounded-lg bg-white p-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="truncate text-sm font-medium text-slate-900">{resource.title}</p>
+                              <p className="truncate text-xs text-slate-600">{resource.fileUrl}</p>
+                              <span className="mt-1 inline-block rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-700">{resource.type}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteLessonResource(resource.id)}
+                              disabled={deletingResourceId === resource.id}
+                              className="shrink-0 rounded-lg bg-rose-100 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-200 disabled:opacity-50"
+                            >
+                              {deletingResourceId === resource.id ? "..." : "Delete"}
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Add New Resource */}
+                    <div className="space-y-2">
+                      <div className="grid gap-2 md:grid-cols-2">
+                        <input
+                          type="text"
+                          value={newResourceTitle}
+                          onChange={(e) => setNewResourceTitle(e.target.value)}
+                          placeholder="Resource title (e.g., 'Lab Manual PDF')"
+                          className="rounded-lg border border-slate-300 px-3 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
+                        />
+                        <select
+                          value={newResourceType}
+                          onChange={(e) => setNewResourceType(e.target.value)}
+                          className="rounded-lg border border-slate-300 px-3 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
+                        >
+                          <option value="pdf">PDF</option>
+                          <option value="doc">Document</option>
+                          <option value="image">Image</option>
+                          <option value="video">Video</option>
+                          <option value="other">Other</option>
+                        </select>
+                      </div>
+                      <input
+                        type="url"
+                        value={newResourceUrl}
+                        onChange={(e) => setNewResourceUrl(e.target.value)}
+                        placeholder="File URL (e.g., https://example.com/file.pdf)"
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/15"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddLessonResource}
+                        disabled={addingResource || !newResourceTitle || !newResourceUrl}
+                        className="w-full rounded-lg bg-brand-blue px-3 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                      >
+                        {addingResource ? "Adding..." : "Add Resource"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3 border-t border-slate-200 pt-4">
+                  <button type="button" onClick={() => setIsLmsLessonModalOpen(false)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50">Cancel</button>
+                  <button type="submit" disabled={lmsSubmitting} className="rounded-xl bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60">
+                    {lmsSubmitting ? "Saving..." : lmsLessonMode === "create" ? "Create Lesson" : "Save Changes"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : null}
+
+        {videoPreviewLesson ? (() => {
+          const preview = getVideoPreviewData(videoPreviewLesson.videoUrl);
+
+          return (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 px-4 py-6 backdrop-blur-sm"
+              onClick={closeLmsVideoPreview}
+            >
+              <div
+                className="w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4 sm:px-6">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Video Preview</p>
+                    <h3 className="mt-1 truncate text-lg font-semibold text-slate-900">{videoPreviewLesson.title}</h3>
+                    <p className="mt-1 text-sm text-slate-600">{videoPreviewLesson.content || "Lesson media preview"}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeLmsVideoPreview}
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="p-5 sm:p-6">
+                  {preview ? (
+                    <div className="overflow-hidden rounded-2xl bg-black shadow-lg ring-1 ring-slate-200">
+                      <div className="aspect-video">
+                        <iframe
+                          src={preview.embedUrl}
+                          title={videoPreviewLesson.title}
+                          className="h-full w-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-sm text-slate-500">
+                      This lesson does not have a supported embedded video link.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })() : null}
 
         {viewingOrder ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4 py-6 backdrop-blur-sm">

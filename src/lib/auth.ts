@@ -41,21 +41,21 @@ export function useAdminAuthGuard({
     if (requireToken) {
       if (!token) {
         router.replace(redirectPath);
-        setIsReady(false);
+        queueMicrotask(() => setIsReady(false));
         return;
       }
 
-      setIsReady(true);
+      queueMicrotask(() => setIsReady(true));
       return;
     }
 
     if (token) {
       router.replace(redirectPath);
-      setIsReady(false);
+      queueMicrotask(() => setIsReady(false));
       return;
     }
 
-    setIsReady(true);
+    queueMicrotask(() => setIsReady(true));
   }, [requireToken, redirectPath, router]);
 
   return {
