@@ -4,13 +4,16 @@ import { verifyAdminToken } from "@/lib/adminAuth";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { lessonId: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { lessonId } = params;
+    const { id: lessonId } = await params;
 
     if (!lessonId) {
-      return NextResponse.json({ error: "Lesson ID is required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Lesson ID is required." },
+        { status: 400 }
+      );
     }
 
     // Verify lesson exists
@@ -19,7 +22,10 @@ export async function GET(
     });
 
     if (!lesson) {
-      return NextResponse.json({ error: "Lesson not found." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Lesson not found." },
+        { status: 404 }
+      );
     }
 
     // Get all resources for the lesson
@@ -34,32 +40,45 @@ export async function GET(
     });
   } catch (error) {
     console.error("Error fetching resources:", error);
-    return NextResponse.json({ error: "Failed to fetch resources." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to fetch resources." },
+      { status: 500 }
+    );
   }
 }
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { lessonId: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // Verify admin token
     if (!verifyAdminToken(req)) {
-      return NextResponse.json({ error: "Unauthorized. Admin token required." }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized. Admin token required." },
+        { status: 401 }
+      );
     }
 
-    const { lessonId } = params;
+    const { id: lessonId } = await params;
+
     const body = await req.json();
     const title = String(body?.title || "").trim();
     const fileUrl = String(body?.fileUrl || "").trim();
     const type = String(body?.type || "pdf").toLowerCase();
 
     if (!lessonId) {
-      return NextResponse.json({ error: "Lesson ID is required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Lesson ID is required." },
+        { status: 400 }
+      );
     }
 
     if (!title || !fileUrl) {
-      return NextResponse.json({ error: "Title and fileUrl are required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Title and fileUrl are required." },
+        { status: 400 }
+      );
     }
 
     // Verify lesson exists
@@ -68,7 +87,10 @@ export async function POST(
     });
 
     if (!lesson) {
-      return NextResponse.json({ error: "Lesson not found." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Lesson not found." },
+        { status: 404 }
+      );
     }
 
     // Create resource
@@ -90,6 +112,9 @@ export async function POST(
     );
   } catch (error) {
     console.error("Error creating resource:", error);
-    return NextResponse.json({ error: "Failed to create resource." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to create resource." },
+      { status: 500 }
+    );
   }
 }

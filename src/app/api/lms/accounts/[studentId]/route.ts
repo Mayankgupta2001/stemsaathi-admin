@@ -4,15 +4,18 @@ import { verifyAdminToken } from "@/lib/adminAuth";
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { studentId: string } }
+  { params }: { params: Promise<{ studentId: string }> }
 ) {
   try {
     // Verify admin token
     if (!verifyAdminToken(req)) {
-      return NextResponse.json({ error: "Unauthorized. Admin token required." }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized. Admin token required." },
+        { status: 401 }
+      );
     }
 
-    const { studentId } = params;
+    const { studentId } = await params;
 
     if (!studentId) {
       return NextResponse.json({ error: "Student ID is required." }, { status: 400 });
@@ -69,7 +72,7 @@ export async function GET(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { studentId: string } }
+  { params }: { params: Promise<{ studentId: string }> }
 ) {
   try {
     // Verify admin token
@@ -77,7 +80,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized. Admin token required." }, { status: 401 });
     }
 
-    const { studentId } = params;
+    const { studentId } = await params;
 
     if (!studentId) {
       return NextResponse.json({ error: "Student ID is required." }, { status: 400 });

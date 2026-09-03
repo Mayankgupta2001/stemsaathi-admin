@@ -4,18 +4,24 @@ import { verifyAdminToken } from "@/lib/adminAuth";
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { lessonId: string; resourceId: string } }
+  { params }: { params: Promise<{ id: string; resourceId: string }> }
 ) {
   try {
     // Verify admin token
     if (!verifyAdminToken(req)) {
-      return NextResponse.json({ error: "Unauthorized. Admin token required." }, { status: 401 });
+      return NextResponse.json(
+        { error: "Unauthorized. Admin token required." },
+        { status: 401 }
+      );
     }
 
-    const { lessonId, resourceId } = params;
+    const { id: lessonId, resourceId } = await params;
 
     if (!lessonId || !resourceId) {
-      return NextResponse.json({ error: "Lesson ID and Resource ID are required." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Lesson ID and Resource ID are required." },
+        { status: 400 }
+      );
     }
 
     // Verify resource exists and belongs to the lesson
@@ -24,7 +30,10 @@ export async function DELETE(
     });
 
     if (!resource || resource.lessonId !== lessonId) {
-      return NextResponse.json({ error: "Resource not found." }, { status: 404 });
+      return NextResponse.json(
+        { error: "Resource not found." },
+        { status: 404 }
+      );
     }
 
     // Delete resource
@@ -38,7 +47,10 @@ export async function DELETE(
     });
   } catch (error) {
     console.error("Error deleting resource:", error);
-    return NextResponse.json({ error: "Failed to delete resource." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to delete resource." },
+      { status: 500 }
+    );
   }
 }
 
